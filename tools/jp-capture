@@ -1,0 +1,800 @@
+#!/usr/bin/env node
+
+const fs = require("fs");
+const path = require("path");
+const http = require("http");
+const { execSync } = require("child_process");
+
+function loadPlaywright() {
+    try {
+        return require("playwright").chromium;
+    } catch (localError) {
+        try {
+            const globalRoot = execSync("npm root -g", { encoding: "utf8" }).trim();
+            return require(path.join(globalRoot, "playwright")).chromium;
+        } catch (globalError) {
+            console.error("Playwright is not installed.");
+            console.error("Run: npm install -g playwright && npx playwright install chromium");
+            process.exit(1);
+        }
+    }
+}
+
+const chromium = loadPlaywright();
+
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    console.log("Usage: jp-capture [msk|dsk] [waitSeconds] [folderFilter]");
+        console.log("Examples: jp-capture msk 3 EN/V1 | jp-capture dsk 10 dsk_spider-v1 | jp-capture EN/V1 --and FR/Product_Test");
+        console.log("          jp-capture-remove | jp-capture-remove FR/Product_Test --and NL/V2");
+    console.log("Default: auto-detects DSK from the current path, otherwise MSK.");
+    console.log("Default wait: 3s. folderFilter must use / for folder levels, like EN/V1, and is case-sensitive.");
+    console.log("Advanced filters: use --and/--AND for multiple folders, and --not to exclude. Example: EN/V1 --and FR/Product_Test --not DE/Simulated_DSK");
+    console.log("MSK uses a stable 300x600 preview with ADVERTISEMENT/main/Scroll for more bars.");
+    console.log("Advanced override: JP_CAPTURE_WAIT=3500 JP_CAPTURE_QUALITY=90");
+    process.exit(0);
+}
+
+const root = process.cwd();
+const commandName = path.basename(process.argv[1] || "");
+const sizes = {
+    msk: { width: 300, height: 600 },
+    mobile: { width: 300, height: 600 },
+    dsk: { width: 1920, height: 1200 },
+    desktop: { width: 1920, height: 1200 }
+};
+const modeNames = new Set(Object.keys(sizes));
+const commandIsRemove = commandName === "jp-capture-remove";
+const rawArgs = process.argv.slice(2);
+const shouldRemove = commandIsRemove;
+const captureArgs = rawArgs;
+const errorColor = process.stderr.isTTY ? {
+    reset: "\x1b[0m",
+    bold: "\x1b[1m",
+    red: "\x1b[31m",
+    yellow: "\x1b[33m"
+} : { reset: "", bold: "", red: "", yellow: "" };
+
+function fail(message, details) {
+    console.error(errorColor.bold + errorColor.red + "JP Tools error:" + errorColor.reset + " " + message);
+
+    (details || []).forEach((line) => {
+        console.error("  " + errorColor.yellow + "-" + errorColor.reset + " " + line);
+    });
+
+    process.exit(1);
+}
+
+let requestedMode = "auto";
+let waitArg;
+const targetParts = [];
+
+for (const arg of captureArgs) {
+    const lowerArg = arg.toLowerCase();
+    const numberArg = Number(arg);
+
+    if (requestedMode === "auto" && modeNames.has(lowerArg)) {
+        requestedMode = lowerArg;
+        continue;
+    }
+
+    if (waitArg === undefined && targetParts.length === 0 && Number.isFinite(numberArg)) {
+        waitArg = numberArg;
+        continue;
+    }
+
+    targetParts.push(arg);
+}
+
+const targetFilter = targetParts.join(" ").trim();
+const targetFilters = splitCaptureFilters(targetParts);
+const mode = requestedMode === "auto"
+    ? (/([\\/]|^)dsk([\\/]|$)/i.test(root) ? "dsk" : "msk")
+    : requestedMode;
+const waitMs = Number(process.env.JP_CAPTURE_WAIT || ((Number.isFinite(waitArg) ? waitArg : 3) * 1000));
+const quality = Number(process.env.JP_CAPTURE_QUALITY || 90);
+const viewport = sizes[mode];
+const mskTopBarHeight = Number(process.env.JP_MSK_TOP_BAR || 28);
+const mskBottomBarHeight = Number(process.env.JP_MSK_BOTTOM_BAR || 32);
+const isMskMode = mode === "msk" || mode === "mobile";
+
+if (!viewport) {
+    console.error("Usage: jp-capture [msk|dsk] [waitSeconds] [folderFilter]");
+    process.exit(1);
+}
+
+const ignoredDirs = new Set([
+    ".git",
+    ".vscode",
+    ".idea",
+    "node_modules",
+    "_exports",
+    "exports",
+    "dist",
+    "build"
+]);
+
+validateFilterSyntax(targetParts, captureExample("and"));
+
+function scopeCandidatesFromIndexFiles(indexFiles) {
+    const candidates = new Set();
+
+    indexFiles.forEach((indexPath) => {
+        const dir = path.dirname(indexPath);
+        const relative = path.relative(root, dir);
+
+        if (relative) candidates.add(relative);
+    });
+
+    return Array.from(candidates).filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
+
+function pickSecondScope(scopes, first) {
+    return scopes.find((scope) => scope !== first) || first;
+}
+
+function captureExample(kind) {
+    const scopes = scopeCandidatesFromIndexFiles(findIndexFiles(root).sort());
+    const first = scopes[0] || "EN/V1";
+    const second = pickSecondScope(scopes, first) || "FR/Product_Test";
+
+    if (kind === "exclude" && second && second !== first) {
+        return "jp-capture msk 3 " + first + " --not " + second;
+    }
+
+    if (kind === "and" && second && second !== first) {
+        return "jp-capture msk 3 " + first + " --and " + second;
+    }
+
+    return "jp-capture msk 3 " + first;
+}
+
+function cleanFilter(value) {
+    return String(value || "").trim().replace(/^[,]+|[,.;]+$/g, "").trim();
+}
+
+function validateFilterSyntax(parts, example) {
+    let currentHasValue = false;
+    let lastOperator = "";
+
+    for (const part of parts) {
+        const token = cleanFilter(part).toLowerCase();
+        if (!token) continue;
+
+        if (token.startsWith("--") && token !== "--and" && token !== "--not") {
+            fail("Unknown filter operator: " + part, [
+                "Use only --and to add another group and --not to exclude.",
+                "Example: " + example
+            ]);
+        }
+
+        if (token === "--and") {
+            if (!currentHasValue) {
+                fail("The --and operator needs a filter before and after it.", [
+                    "Do not leave --and alone or next to another operator.",
+                    "Example: " + example
+                ]);
+            }
+
+            currentHasValue = false;
+            lastOperator = "--and";
+            continue;
+        }
+
+        if (token === "--not") {
+            if (lastOperator === "--and" && !currentHasValue) {
+                fail("The --and operator needs a filter before --not.", [
+                    "Put the folder/version after --and, then use --not if needed.",
+                    "Example: " + example
+                ]);
+            }
+
+            if (lastOperator === "--not" && !currentHasValue) {
+                fail("The --not operator needs a filter after it.", [
+                    "Tell JP Tools which folder/version should be excluded.",
+                    "Example: " + example
+                ]);
+            }
+
+            currentHasValue = false;
+            lastOperator = "--not";
+            continue;
+        }
+
+        currentHasValue = true;
+        lastOperator = "";
+    }
+
+    if (!currentHasValue && lastOperator) {
+        fail("The " + lastOperator + " operator is missing its filter.", [
+            lastOperator + " cannot be the last part of the command.",
+            "Example: " + example
+        ]);
+    }
+}
+
+function splitCaptureFilters(parts) {
+    const includes = [];
+    const excludes = [];
+    let current = [];
+    let mode = "include";
+
+    function pushCurrent() {
+        const filter = cleanFilter(current.join(" "));
+        if (filter) {
+            (mode === "exclude" ? excludes : includes).push(filter);
+        }
+        current = [];
+    }
+
+    for (const part of parts) {
+        const token = cleanFilter(part).toLowerCase();
+
+        if (token === "--not") {
+            pushCurrent();
+            mode = "exclude";
+            continue;
+        }
+
+        if (token === "--and") {
+            pushCurrent();
+            continue;
+        }
+
+        current.push(part);
+    }
+
+    pushCurrent();
+    return { includes, excludes };
+}
+
+function findIndexFiles(dir, results = []) {
+    let entries;
+
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        return results;
+    }
+
+    for (const entry of entries) {
+        if (ignoredDirs.has(entry.name)) continue;
+        if (entry.name.startsWith(".")) continue;
+
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+            findIndexFiles(fullPath, results);
+            continue;
+        }
+
+        if (entry.isFile() && entry.name.toLowerCase() === "index.html") {
+            results.push(fullPath);
+        }
+    }
+
+    return results;
+}
+
+function isInside(childPath, parentPath) {
+    return childPath === parentPath || childPath.startsWith(parentPath + path.sep);
+}
+
+function normalizeFilterPath(value) {
+    return cleanFilter(value).replace(/[\/]+/g, path.sep);
+}
+
+function slashSuggestion(value) {
+    return cleanFilter(value).replace(/\s+/g, path.sep).replace(/[\/]+/g, path.sep);
+}
+
+function pathExistsCaseSensitive(targetPath) {
+    const relative = path.relative(root, path.resolve(targetPath));
+
+    if (!relative || relative === ".") return true;
+    if (relative.startsWith("..") || path.isAbsolute(relative)) return false;
+
+    let current = root;
+
+    for (const segment of relative.split(path.sep).filter(Boolean)) {
+        let entries;
+
+        try {
+            entries = fs.readdirSync(current);
+        } catch (error) {
+            return false;
+        }
+
+        if (!entries.includes(segment)) return false;
+        current = path.join(current, segment);
+    }
+
+    return fs.existsSync(current);
+}
+
+function relativeCandidatesForIndex(indexFiles) {
+    const candidates = new Set();
+
+    indexFiles.forEach((indexPath) => {
+        candidates.add(path.relative(root, indexPath));
+        candidates.add(path.relative(root, path.dirname(indexPath)));
+    });
+
+    return Array.from(candidates).filter(Boolean).sort();
+}
+
+function findSimilarPathFilter(filter, candidates) {
+    const exact = normalizeFilterPath(filter);
+    const slash = slashSuggestion(filter);
+    const exactLower = exact.toLowerCase();
+    const slashLower = slash.toLowerCase();
+
+    if (slash !== exact) {
+        const slashMatch = candidates.find((candidate) => candidate.includes(slash));
+        if (slashMatch) return { reason: "slash", value: slashMatch };
+    }
+
+    const caseMatch = candidates.find((candidate) => candidate.includes(exact) || candidate.includes(slash));
+    if (caseMatch) return { reason: "exact", value: caseMatch };
+
+    const caseInsensitiveMatch = candidates.find((candidate) => candidate.toLowerCase().includes(exactLower) || candidate.toLowerCase().includes(slashLower));
+    if (caseInsensitiveMatch) return { reason: "case", value: caseInsensitiveMatch };
+
+    return null;
+}
+
+function describeMissingPathFilter(filter, candidates) {
+    const similar = findSimilarPathFilter(filter, candidates);
+
+    if (similar && similar.reason === "slash") {
+        return "Folder/version filter not found: " + filter + ". Did you mean " + similar.value + "? Use / for folder levels.";
+    }
+
+    if (similar && similar.reason === "case") {
+        return "Folder/version filter not found: " + filter + ". Found similar path with different uppercase/lowercase: " + similar.value + ". Filters are case-sensitive.";
+    }
+
+    return "Folder/version filter not found: " + filter + ". Filters are case-sensitive and must use / for levels, like EN/V2.";
+}
+
+function validatePathFilters(filters, indexFiles) {
+    if (!filters.includes.length && !filters.excludes.length) return;
+
+    const candidates = relativeCandidatesForIndex(indexFiles);
+    const missing = [];
+
+    [...filters.includes, ...filters.excludes].forEach((filter) => {
+        if (!indexFiles.some((indexPath) => matchIndexFilter(indexPath, filter))) {
+            missing.push(describeMissingPathFilter(filter, candidates));
+        }
+    });
+
+    if (!missing.length) return;
+
+    fail("Invalid folder/version filter.", [
+        ...Array.from(new Set(missing)),
+        "Use the exact uppercase/lowercase from the folder name.",
+        "Example: " + captureExample("exclude")
+    ]);
+}
+
+function matchIndexFilter(indexPath, filter) {
+    if (!filter) return true;
+
+    const normalizedTarget = normalizeFilterPath(filter);
+    const targetPath = path.resolve(root, normalizedTarget);
+
+    if (pathExistsCaseSensitive(targetPath)) {
+        const stats = fs.statSync(targetPath);
+
+        if (stats.isDirectory()) {
+            return isInside(indexPath, targetPath) || isInside(path.dirname(indexPath), targetPath);
+        }
+
+        return indexPath === targetPath;
+    }
+
+    return path.relative(root, path.dirname(indexPath)).includes(normalizedTarget) ||
+        path.relative(root, indexPath).includes(normalizedTarget);
+}
+
+function filterIndexFiles(indexFiles) {
+    if (!targetFilters.includes.length && !targetFilters.excludes.length) return indexFiles;
+
+    return indexFiles.filter((indexPath) => {
+        const included = !targetFilters.includes.length ||
+            targetFilters.includes.some((filter) => matchIndexFilter(indexPath, filter));
+        const excluded = targetFilters.excludes.some((filter) => matchIndexFilter(indexPath, filter));
+
+        return included && !excluded;
+    });
+}
+
+function contentType(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    const map = {
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "application/javascript; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".svg": "image/svg+xml",
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf"
+    };
+
+    return map[ext] || "application/octet-stream";
+}
+
+function startStaticServer() {
+    const server = http.createServer((req, res) => {
+        let urlPath;
+
+        try {
+            urlPath = decodeURIComponent(new URL(req.url, "http://127.0.0.1").pathname);
+        } catch (error) {
+            res.writeHead(400);
+            res.end("Bad request");
+            return;
+        }
+
+        if (urlPath === "/__jp_msk_preview__") {
+            const params = new URL(req.url, "http://127.0.0.1").searchParams;
+            const src = params.get("src") || "";
+            const topBar = params.get("top") || "28";
+            const bottomBar = params.get("bottom") || "32";
+            const mainSrcPath = path.normalize(path.join(root, src));
+
+            if (!mainSrcPath.startsWith(root) || !fs.existsSync(mainSrcPath)) {
+                res.writeHead(404);
+                res.end("Main panel not found");
+                return;
+            }
+
+            const iframeSrc = "/" + src.split(path.sep).map(encodeURIComponent).join("/");
+            const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+}
+.jp-shot {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: #000;
+    font-family: Arial, Helvetica, sans-serif;
+}
+.jp-ad-top,
+.jp-ad-bottom {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    background: #000;
+    color: #fff;
+    z-index: 2;
+    text-align: center;
+    box-sizing: border-box;
+}
+.jp-ad-top {
+    top: 0;
+    height: ${topBar}px;
+    line-height: ${topBar}px;
+    font-size: 11px;
+    font-weight: 700;
+}
+.jp-ad-bottom {
+    bottom: 0;
+    height: ${bottomBar}px;
+    line-height: ${bottomBar}px;
+    font-size: 12px;
+}
+.jp-triangle {
+    position: absolute;
+    top: 50%;
+    width: 0;
+    height: 0;
+    margin-top: -4px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 9px solid #fff;
+}
+.jp-triangle.left { left: 22px; }
+.jp-triangle.right { right: 22px; }
+#jp-main-frame {
+    position: absolute;
+    top: ${topBar}px;
+    left: 0;
+    width: 100%;
+    height: calc(100% - ${topBar}px - ${bottomBar}px);
+    border: 0;
+    display: block;
+    background: #000;
+}
+</style>
+</head>
+<body>
+<div class="jp-shot">
+    <div class="jp-ad-top">ADVERTISEMENT</div>
+    <iframe id="jp-main-frame" src="${iframeSrc}"></iframe>
+    <div class="jp-ad-bottom"><span class="jp-triangle left"></span>Scroll for more<span class="jp-triangle right"></span></div>
+</div>
+</body>
+</html>`;
+
+            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(html);
+            return;
+        }
+
+        let filePath = path.normalize(path.join(root, urlPath));
+
+        if (!filePath.startsWith(root)) {
+            res.writeHead(403);
+            res.end("Forbidden");
+            return;
+        }
+
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+            filePath = path.join(filePath, "index.html");
+        }
+
+        fs.readFile(filePath, (error, data) => {
+            if (error) {
+                res.writeHead(404);
+                res.end("Not found");
+                return;
+            }
+
+            res.writeHead(200, { "Content-Type": contentType(filePath) });
+            res.end(data);
+        });
+    });
+
+    return new Promise((resolve) => {
+        server.listen(0, "127.0.0.1", () => {
+            resolve({
+                server,
+                origin: `http://127.0.0.1:${server.address().port}`
+            });
+        });
+    });
+}
+
+function hasMskMain(indexPath) {
+    return fs.existsSync(path.join(path.dirname(indexPath), "banner", "main.html"));
+}
+
+async function installMskCaptureEnvironment(page) {
+    await page.addInitScript(() => {
+        function patchPremiumVisibility() {
+            const premium = window.Premium;
+
+            if (!premium || typeof premium !== "object") return;
+
+            premium.jpxApi = premium.jpxApi || {};
+            premium.jpxApi.getPercentageVisibility = () => ({
+                top: 0,
+                main: 100,
+                bottom: 0,
+                expanded: 0
+            });
+            premium.jpxApi.getFixedElemPosition = () => "top";
+
+            premium.product = premium.product || {};
+            premium.product.scopeWindow = premium.product.scopeWindow || window;
+
+            if (typeof premium.product.initOrientationMessage !== "function") {
+                premium.product.initOrientationMessage = () => {};
+            }
+        }
+
+        window.Premium = window.Premium || {};
+        patchPremiumVisibility();
+
+        const patchTimer = window.setInterval(patchPremiumVisibility, 25);
+        window.addEventListener("load", () => {
+            patchPremiumVisibility();
+            window.setTimeout(() => window.clearInterval(patchTimer), 5000);
+        });
+    });
+}
+
+async function settleMskFrame(page) {
+    await page.evaluate(() => {
+        const frame = document.querySelector("#jp-main-frame");
+        const win = frame && frame.contentWindow;
+        const doc = frame && frame.contentDocument;
+
+        if (!win || !doc || !doc.body) return;
+
+        function dispatch(target, type) {
+            try {
+                target.dispatchEvent(new win.Event(type));
+            } catch (error) {}
+        }
+
+        function forceVisibleElement(el) {
+            el.style.opacity = "1";
+            el.style.visibility = "visible";
+        }
+
+        const premium = win.Premium;
+
+        if (premium && typeof premium === "object") {
+            premium.jpxApi = premium.jpxApi || {};
+            premium.jpxApi.getPercentageVisibility = () => ({
+                top: 0,
+                main: 100,
+                bottom: 0,
+                expanded: 0
+            });
+            premium.jpxApi.getFixedElemPosition = () => "top";
+
+            if (premium.product) {
+                premium.product.scopeWindow = premium.product.scopeWindow || win;
+            }
+        }
+
+        forceVisibleElement(doc.documentElement);
+        forceVisibleElement(doc.body);
+
+        dispatch(win, "resize");
+        dispatch(win, "scroll");
+        dispatch(win, "load");
+
+        const scopeWindow = premium && premium.product && premium.product.scopeWindow;
+        if (scopeWindow && scopeWindow !== win) {
+            dispatch(scopeWindow, "scroll");
+        }
+
+        const gsap = win.gsap || win.TweenMax || win.TweenLite;
+        if (gsap && gsap.globalTimeline) {
+            try {
+                const duration = gsap.globalTimeline.duration();
+
+                if (Number.isFinite(duration) && duration > 0 && duration < 120) {
+                    gsap.globalTimeline.time(duration, false).pause();
+                }
+            } catch (error) {}
+        }
+
+        try {
+            doc.getAnimations({ subtree: true }).forEach((animation) => {
+                const timing = animation.effect && animation.effect.getTiming && animation.effect.getTiming();
+                const duration = timing && Number(timing.duration);
+
+                if (Number.isFinite(duration) && duration > 0) {
+                    animation.currentTime = duration;
+                    animation.pause();
+                }
+            });
+        } catch (error) {}
+
+        const captureStyle = doc.createElement("style");
+        captureStyle.setAttribute("data-jp-capture", "msk-final-state");
+        captureStyle.textContent = `
+html,
+body {
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+.jp-entrance-anim,
+[class*="entrance"],
+[class*="anim"] {
+    opacity: 1 !important;
+    visibility: visible !important;
+    clip-path: inset(0 0 0 0) !important;
+}
+`;
+        doc.head.appendChild(captureStyle);
+    }).catch(() => {});
+}
+
+(async () => {
+    const allIndexFiles = findIndexFiles(root).sort();
+    validatePathFilters(targetFilters, allIndexFiles);
+    const filteredIndexFiles = filterIndexFiles(allIndexFiles);
+    const indexFiles = shouldRemove
+        ? filteredIndexFiles
+        : isMskMode
+            ? filteredIndexFiles.filter(hasMskMain)
+            : filteredIndexFiles;
+
+    if (!indexFiles.length) {
+        if (targetFilter) {
+            fail("No index.html files matched the filter: " + targetFilter, [
+                "Use / for folder levels, like EN/V1.",
+                "Keep the command order: jp-capture [msk|dsk] [time] [filter].",
+                "Example: " + captureExample("and")
+            ]);
+        }
+
+        console.log("No index.html files found from:", root);
+        process.exit(0);
+    }
+
+    if (targetFilter) {
+        console.log(`Filter: ${targetFilter}`);
+    }
+
+    if (shouldRemove) {
+        let removed = 0;
+
+        for (const indexPath of indexFiles) {
+            const backupPath = path.join(path.dirname(indexPath), "banner", "backup.jpg");
+
+            if (fs.existsSync(backupPath)) {
+                fs.unlinkSync(backupPath);
+                removed += 1;
+                console.log(`Removed ${path.relative(root, backupPath)}`);
+            }
+        }
+
+        console.log(`Done. Removed ${removed} backup${removed === 1 ? "" : "s"}.`);
+        return;
+    }
+
+    const { server, origin } = await startStaticServer();
+    const browser = await chromium.launch();
+    const page = await browser.newPage({
+        viewport,
+        deviceScaleFactor: 1
+    });
+
+    if (isMskMode) {
+        await installMskCaptureEnvironment(page);
+    }
+
+    for (const indexPath of indexFiles) {
+        const relativeIndex = path.relative(root, indexPath);
+        const bannerDir = path.join(path.dirname(indexPath), "banner");
+        const outputPath = path.join(bannerDir, "backup.jpg");
+
+        console.log(`Capturing ${relativeIndex} -> ${path.relative(root, outputPath)}`);
+
+        const relativeMain = path.relative(root, path.join(path.dirname(indexPath), "banner", "main.html"));
+        const urlPath = relativeIndex.split(path.sep).map(encodeURIComponent).join("/");
+
+        if (isMskMode) {
+            const previewUrl = `${origin}/__jp_msk_preview__?src=${encodeURIComponent(relativeMain)}&top=${mskTopBarHeight}&bottom=${mskBottomBarHeight}`;
+            await page.goto(previewUrl, { waitUntil: "load" });
+            await page.waitForSelector("#jp-main-frame", { timeout: 3000 }).catch(() => {});
+        } else {
+            await page.goto(`${origin}/${urlPath}`, { waitUntil: "load" });
+        }
+
+        await page.waitForTimeout(waitMs);
+
+        if (isMskMode) {
+            await settleMskFrame(page);
+            await page.waitForTimeout(100);
+        }
+
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+        await page.screenshot({
+            path: outputPath,
+            type: "jpeg",
+            quality,
+            fullPage: false
+        });
+    }
+
+    await browser.close();
+    server.close();
+    console.log("Done.");
+})();

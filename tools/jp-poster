@@ -1,0 +1,886 @@
+#!/usr/bin/env node
+
+const fs = require("fs");
+const path = require("path");
+const http = require("http");
+const { execSync, spawnSync } = require("child_process");
+
+function loadPlaywright() {
+    try {
+        return require("playwright").chromium;
+    } catch (localError) {
+        try {
+            const globalRoot = execSync("npm root -g", { encoding: "utf8" }).trim();
+            return require(path.join(globalRoot, "playwright")).chromium;
+        } catch (globalError) {
+            console.error("Playwright is not installed.");
+            console.error("Run: npm install -g playwright && npx playwright install chromium");
+            process.exit(1);
+        }
+    }
+}
+
+const chromium = loadPlaywright();
+const root = process.cwd();
+const commandName = path.basename(process.argv[1] || "");
+const originalArgs = process.argv.slice(2);
+const commandIsRemove = commandName === "jp-poster-remove";
+const shouldRemove = commandIsRemove;
+const rawArgs = originalArgs;
+const errorColor = process.stderr.isTTY ? {
+    reset: "\x1b[0m",
+    bold: "\x1b[1m",
+    red: "\x1b[31m",
+    yellow: "\x1b[33m"
+} : { reset: "", bold: "", red: "", yellow: "" };
+
+function fail(message, details) {
+    console.error(errorColor.bold + errorColor.red + "JP Tools error:" + errorColor.reset + " " + message);
+
+    (details || []).forEach((line) => {
+        console.error("  " + errorColor.yellow + "-" + errorColor.reset + " " + line);
+    });
+
+    process.exit(1);
+}
+
+
+const presetSizes = {
+    "16x9": { width: 1920, height: 1080 },
+    "9x16": { width: 1080, height: 1920 },
+    "1x1": { width: 1080, height: 1080 },
+    square: { width: 1080, height: 1080 },
+    msk: { width: 300, height: 600 },
+    dsk: { width: 1920, height: 1200 }
+};
+
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    console.log("Usage: jp-poster [16x9|9x16|1x1|WxH] [seconds] [folderFilter]");
+    console.log("       jp-poster-remove [folderFilter]");
+    console.log("Examples: jp-poster 16x9 2 | jp-poster 9x16 5 EN/V1 --and NL/V2 --not DE/Simulated_DSK | jp-poster 300x600 1");
+    console.log("          jp-poster-remove | jp-poster-remove FR/Product_Test --and NL/V2 | jp-poster-remove FR/Product_Test --not DE/Simulated_DSK");
+    console.log("Default size: 16x9. Default time: 1s.");
+    console.log("Finds local videos and video URLs referenced in index/banner HTML, JS or JSON.");
+    console.log("Output: banner/assets/poster.jpg, poster2.jpg, poster3.jpg... for each unique video source.");
+    console.log("Advanced filters: use / for folder levels, --and/--AND for multiple folders, and --not to exclude. Filters are case-sensitive.");
+    console.log("Advanced override: JP_POSTER_QUALITY=90 JP_POSTER_FIT=cover");
+    process.exit(0);
+}
+
+let sizeArg;
+let secondArg;
+const targetParts = [];
+
+for (const arg of rawArgs) {
+    const lowerArg = arg.toLowerCase();
+    const numberArg = Number(arg.replace(",", "."));
+
+    if (!sizeArg && targetParts.length === 0 && (presetSizes[lowerArg] || /^\d+x\d+$/i.test(lowerArg))) {
+        sizeArg = lowerArg;
+        continue;
+    }
+
+    if (secondArg === undefined && targetParts.length === 0 && Number.isFinite(numberArg)) {
+        secondArg = numberArg;
+        continue;
+    }
+
+    targetParts.push(arg);
+}
+
+const targetFilter = targetParts.join(" ").trim();
+const targetFilters = splitPathFilters(targetParts);
+const outputSize = parseSize(sizeArg || "16x9");
+const captureSecond = Math.max(0, Number.isFinite(secondArg) ? secondArg : 1);
+const quality = clamp(Number(process.env.JP_POSTER_QUALITY || 90), 1, 100);
+const objectFit = (process.env.JP_POSTER_FIT || "cover").toLowerCase() === "contain" ? "contain" : "cover";
+
+const ignoredDirs = new Set([
+    ".git",
+    ".vscode",
+    ".idea",
+    "node_modules",
+    "_exports",
+    "exports",
+    "dist",
+    "build"
+]);
+
+const videoExts = new Set([".mp4", ".webm", ".mov", ".m4v"]);
+const referenceExts = new Set([".html", ".htm", ".js", ".json"]);
+
+validateFilterSyntax(targetParts, posterExample("and"));
+
+function scopeCandidatesFromKnownPaths() {
+    const candidates = new Set();
+
+    collectFilterCandidates().forEach((itemPath) => {
+        let current = fs.existsSync(itemPath) && fs.statSync(itemPath).isDirectory()
+            ? itemPath
+            : path.dirname(itemPath);
+
+        while (current && current.startsWith(root)) {
+            if (fs.existsSync(path.join(current, "banner")) || fs.existsSync(path.join(current, "index.html"))) {
+                const relative = path.relative(root, current);
+                if (relative) candidates.add(relative);
+                break;
+            }
+
+            const next = path.dirname(current);
+            if (next === current) break;
+            current = next;
+        }
+    });
+
+    return Array.from(candidates).filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
+
+function pickSecondScope(scopes, first) {
+    return scopes.find((scope) => scope !== first) || first;
+}
+
+function posterExample(kind) {
+    const scopes = scopeCandidatesFromKnownPaths();
+    const first = scopes[0] || "EN/V1";
+    const second = pickSecondScope(scopes, first) || "FR/Product_Test";
+
+    if (kind === "exclude" && second && second !== first) {
+        return "jp-poster 16x9 2 " + first + " --not " + second;
+    }
+
+    if (kind === "and" && second && second !== first) {
+        return "jp-poster 16x9 2 " + first + " --and " + second;
+    }
+
+    return "jp-poster 16x9 2 " + first;
+}
+
+function cleanFilter(value) {
+    return String(value || "").trim().replace(/^[,]+|[,.;]+$/g, "").trim();
+}
+
+function validateFilterSyntax(parts, example) {
+    let currentHasValue = false;
+    let lastOperator = "";
+
+    for (const part of parts) {
+        const token = cleanFilter(part).toLowerCase();
+        if (!token) continue;
+
+        if (token.startsWith("--") && token !== "--and" && token !== "--not") {
+            fail("Unknown filter operator: " + part, [
+                "Use only --and to add another group and --not to exclude.",
+                "Example: " + example
+            ]);
+        }
+
+        if (token === "--and") {
+            if (!currentHasValue) {
+                fail("The --and operator needs a filter before and after it.", [
+                    "Do not leave --and alone or next to another operator.",
+                    "Example: " + example
+                ]);
+            }
+
+            currentHasValue = false;
+            lastOperator = "--and";
+            continue;
+        }
+
+        if (token === "--not") {
+            if (lastOperator === "--and" && !currentHasValue) {
+                fail("The --and operator needs a filter before --not.", [
+                    "Put the folder/version after --and, then use --not if needed.",
+                    "Example: " + example
+                ]);
+            }
+
+            if (lastOperator === "--not" && !currentHasValue) {
+                fail("The --not operator needs a filter after it.", [
+                    "Tell JP Tools which folder/version should be excluded.",
+                    "Example: " + example
+                ]);
+            }
+
+            currentHasValue = false;
+            lastOperator = "--not";
+            continue;
+        }
+
+        currentHasValue = true;
+        lastOperator = "";
+    }
+
+    if (!currentHasValue && lastOperator) {
+        fail("The " + lastOperator + " operator is missing its filter.", [
+            lastOperator + " cannot be the last part of the command.",
+            "Example: " + example
+        ]);
+    }
+}
+
+function splitPathFilters(parts) {
+    const includes = [];
+    const excludes = [];
+    let current = [];
+    let mode = "include";
+
+    function pushCurrent() {
+        const filter = cleanFilter(current.join(" "));
+        if (filter) {
+            (mode === "exclude" ? excludes : includes).push(filter);
+        }
+        current = [];
+    }
+
+    for (const part of parts) {
+        const token = cleanFilter(part).toLowerCase();
+
+        if (token === "--not") {
+            pushCurrent();
+            mode = "exclude";
+            continue;
+        }
+
+        if (token === "--and") {
+            pushCurrent();
+            continue;
+        }
+
+        current.push(part);
+    }
+
+    pushCurrent();
+    return { includes, excludes };
+}
+
+function parseSize(value) {
+    const lowerValue = String(value).toLowerCase();
+
+    if (presetSizes[lowerValue]) return presetSizes[lowerValue];
+
+    const match = lowerValue.match(/^(\d+)x(\d+)$/);
+    if (!match) {
+        console.error("Invalid size. Use 16x9, 9x16, 1x1, msk, dsk or WxH like 300x600.");
+        process.exit(1);
+    }
+
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+
+    if (!width || !height) {
+        console.error("Invalid size. Width and height must be positive numbers.");
+        process.exit(1);
+    }
+
+    return { width, height };
+}
+
+function clamp(value, min, max) {
+    if (!Number.isFinite(value)) return max;
+    return Math.min(max, Math.max(min, value));
+}
+
+function walkFiles(dir, predicate, results = []) {
+    let entries;
+
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        return results;
+    }
+
+    for (const entry of entries) {
+        if (ignoredDirs.has(entry.name)) continue;
+        if (entry.name.startsWith(".")) continue;
+
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+            walkFiles(fullPath, predicate, results);
+            continue;
+        }
+
+        if (entry.isFile() && predicate(fullPath)) {
+            results.push(fullPath);
+        }
+    }
+
+    return results;
+}
+
+function isInside(childPath, parentPath) {
+    return childPath === parentPath || childPath.startsWith(parentPath + path.sep);
+}
+
+function walkDirs(dir, results = []) {
+    let entries;
+
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        return results;
+    }
+
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (ignoredDirs.has(entry.name)) continue;
+        if (entry.name.startsWith(".")) continue;
+
+        const fullPath = path.join(dir, entry.name);
+        results.push(fullPath);
+        walkDirs(fullPath, results);
+    }
+
+    return results;
+}
+
+function normalizeFilterPath(value) {
+    return cleanFilter(value).replace(/[\/]+/g, path.sep);
+}
+
+function slashSuggestion(value) {
+    return cleanFilter(value).replace(/\s+/g, path.sep).replace(/[\/]+/g, path.sep);
+}
+
+function pathExistsCaseSensitive(targetPath) {
+    const relative = path.relative(root, path.resolve(targetPath));
+
+    if (!relative || relative === ".") return true;
+    if (relative.startsWith("..") || path.isAbsolute(relative)) return false;
+
+    let current = root;
+
+    for (const segment of relative.split(path.sep).filter(Boolean)) {
+        let entries;
+
+        try {
+            entries = fs.readdirSync(current);
+        } catch (error) {
+            return false;
+        }
+
+        if (!entries.includes(segment)) return false;
+        current = path.join(current, segment);
+    }
+
+    return fs.existsSync(current);
+}
+
+function collectFilterCandidates() {
+    return Array.from(new Set([root, ...walkDirs(root), ...walkFiles(root, () => true)])).sort();
+}
+
+function relativeCandidatesForPaths(paths) {
+    const candidates = new Set();
+
+    paths.forEach((filePath) => {
+        candidates.add(path.relative(root, filePath));
+        candidates.add(path.relative(root, path.dirname(filePath)));
+    });
+
+    return Array.from(candidates).filter(Boolean).sort();
+}
+
+function findSimilarPathFilter(filter, candidates) {
+    const exact = normalizeFilterPath(filter);
+    const slash = slashSuggestion(filter);
+    const exactLower = exact.toLowerCase();
+    const slashLower = slash.toLowerCase();
+
+    if (slash !== exact) {
+        const slashMatch = candidates.find((candidate) => candidate.includes(slash));
+        if (slashMatch) return { reason: "slash", value: slashMatch };
+    }
+
+    const caseMatch = candidates.find((candidate) => candidate.includes(exact) || candidate.includes(slash));
+    if (caseMatch) return { reason: "exact", value: caseMatch };
+
+    const caseInsensitiveMatch = candidates.find((candidate) => candidate.toLowerCase().includes(exactLower) || candidate.toLowerCase().includes(slashLower));
+    if (caseInsensitiveMatch) return { reason: "case", value: caseInsensitiveMatch };
+
+    return null;
+}
+
+function describeMissingPathFilter(filter, candidates) {
+    const similar = findSimilarPathFilter(filter, candidates);
+
+    if (similar && similar.reason === "slash") {
+        return "Folder/version filter not found: " + filter + ". Did you mean " + similar.value + "? Use / for folder levels.";
+    }
+
+    if (similar && similar.reason === "case") {
+        return "Folder/version filter not found: " + filter + ". Found similar path with different uppercase/lowercase: " + similar.value + ". Filters are case-sensitive.";
+    }
+
+    return "Folder/version filter not found: " + filter + ". Filters are case-sensitive and must use / for levels, like EN/V2.";
+}
+
+function validatePathFilters(filters) {
+    if (!filters.includes.length && !filters.excludes.length) return;
+
+    const candidates = collectFilterCandidates();
+    const relativeCandidates = relativeCandidatesForPaths(candidates);
+    const missing = [];
+
+    [...filters.includes, ...filters.excludes].forEach((filter) => {
+        if (!candidates.some((filePath) => matchPathFilter(filePath, filter))) {
+            missing.push(describeMissingPathFilter(filter, relativeCandidates));
+        }
+    });
+
+    if (!missing.length) return;
+
+    fail("Invalid folder/version filter.", [
+        ...Array.from(new Set(missing)),
+        "Use the exact uppercase/lowercase from the folder name.",
+        "Example: " + posterExample("exclude")
+    ]);
+}
+
+function matchPathFilter(filePath, filter) {
+    if (!filter) return true;
+
+    const normalizedTarget = normalizeFilterPath(filter);
+    const targetPath = path.resolve(root, normalizedTarget);
+
+    if (pathExistsCaseSensitive(targetPath)) {
+        const stats = fs.statSync(targetPath);
+
+        if (stats.isDirectory()) {
+            return isInside(filePath, targetPath) || isInside(path.dirname(filePath), targetPath);
+        }
+
+        return filePath === targetPath;
+    }
+
+    return path.relative(root, filePath).includes(normalizedTarget) ||
+        path.relative(root, path.dirname(filePath)).includes(normalizedTarget);
+}
+
+function matchesTarget(filePath) {
+    if (!targetFilters.includes.length && !targetFilters.excludes.length) return true;
+
+    const included = !targetFilters.includes.length ||
+        targetFilters.includes.some((filter) => matchPathFilter(filePath, filter));
+    const excluded = targetFilters.excludes.some((filter) => matchPathFilter(filePath, filter));
+
+    return included && !excluded;
+}
+
+function collectLocalVideos(searchRoot) {
+    return walkFiles(searchRoot, (filePath) => videoExts.has(path.extname(filePath).toLowerCase()))
+        .filter(matchesTarget)
+        .map((videoPath) => ({
+            source: videoPath,
+            sourceKind: "local",
+            sourceFile: videoPath,
+            outputDir: nearestAssetsDir(videoPath),
+            outputStem: path.basename(videoPath, path.extname(videoPath))
+        }));
+}
+
+function collectReferenceFiles(searchRoot) {
+    return walkFiles(searchRoot, (filePath) => referenceExts.has(path.extname(filePath).toLowerCase()))
+        .filter(matchesTarget);
+}
+
+function extractVideoReferences(filePath) {
+    let text;
+
+    try {
+        text = fs.readFileSync(filePath, "utf8");
+    } catch (error) {
+        return [];
+    }
+
+    const refs = new Set();
+    const attrRegex = /(?:src|jp-createvideo-src|data-src|video|url)\s*=\s*["']([^"']+?\.(?:mp4|webm|mov|m4v)(?:\?[^"']*)?)["']/gi;
+    const looseRegex = /(?:https?:\/\/|\.\.\/|\.\/|\/|assets\/|banner\/)[^"'\s<>()]+?\.(?:mp4|webm|mov|m4v)(?:\?[^"'\s<>()]*)?/gi;
+    let match;
+
+    while ((match = attrRegex.exec(text))) {
+        refs.add(match[1]);
+    }
+
+    while ((match = looseRegex.exec(text))) {
+        refs.add(match[0]);
+    }
+
+    return Array.from(refs).map((source) => ({
+        source,
+        sourceKind: /^https?:\/\//i.test(source) ? "remote" : "reference",
+        sourceFile: filePath,
+        outputDir: outputDirForReference(filePath),
+        outputStem: stemFromSource(source)
+    }));
+}
+
+function nearestBannerDir(filePath) {
+    let dir = fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()
+        ? filePath
+        : path.dirname(filePath);
+
+    while (dir && dir.startsWith(root)) {
+        if (path.basename(dir).toLowerCase() === "banner") return dir;
+
+        const childBanner = path.join(dir, "banner");
+        if (fs.existsSync(childBanner) && fs.statSync(childBanner).isDirectory()) return childBanner;
+
+        const nextDir = path.dirname(dir);
+        if (nextDir === dir) break;
+        dir = nextDir;
+    }
+
+    const rootBanner = path.join(root, "banner");
+    if (fs.existsSync(rootBanner) && fs.statSync(rootBanner).isDirectory()) return rootBanner;
+
+    return path.dirname(filePath);
+}
+
+function nearestAssetsDir(filePath) {
+    let dir = fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()
+        ? filePath
+        : path.dirname(filePath);
+
+    while (dir && dir.startsWith(root)) {
+        if (path.basename(dir).toLowerCase() === "assets") return dir;
+
+        const nextDir = path.dirname(dir);
+        if (nextDir === dir) break;
+        dir = nextDir;
+    }
+
+    return path.join(nearestBannerDir(filePath), "assets");
+}
+
+function outputDirForReference(filePath) {
+    return nearestAssetsDir(filePath);
+}
+
+function stemFromSource(source) {
+    const cleanSource = source.split("?")[0].split("#")[0];
+    const baseName = path.basename(cleanSource);
+    return path.basename(baseName, path.extname(baseName)) || "poster";
+}
+
+function dedupeSources(sources) {
+    const seen = new Set();
+    const result = [];
+
+    for (const item of sources) {
+        const resolvedSource = resolveSource(item);
+        if (!resolvedSource) continue;
+
+        const key = `${resolvedSource.url || resolvedSource.filePath}|${item.outputDir}`;
+        if (seen.has(key)) continue;
+
+        seen.add(key);
+        result.push({ ...item, resolvedSource });
+    }
+
+    return result;
+}
+
+function resolveSource(item) {
+    if (/^https?:\/\//i.test(item.source)) {
+        return { url: item.source, kind: "remote" };
+    }
+
+    const cleanSource = item.source.split("?")[0].split("#")[0];
+    const query = item.source.slice(cleanSource.length);
+    const candidates = [];
+
+    if (path.isAbsolute(cleanSource)) {
+        candidates.push(cleanSource.startsWith(root) ? cleanSource : path.join(root, cleanSource));
+    } else {
+        candidates.push(path.resolve(path.dirname(item.sourceFile), cleanSource));
+        candidates.push(path.resolve(root, cleanSource));
+    }
+
+    for (const candidate of candidates) {
+        const normalized = path.normalize(candidate);
+
+        if (normalized.startsWith(root) && fs.existsSync(normalized) && fs.statSync(normalized).isFile()) {
+            return { filePath: normalized, query, kind: "local" };
+        }
+    }
+
+    return null;
+}
+
+function contentType(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    const map = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
+        ".m4v": "video/mp4"
+    };
+
+    return map[ext] || "application/octet-stream";
+}
+
+function startStaticServer() {
+    const server = http.createServer((req, res) => {
+        let urlPath;
+
+        try {
+            urlPath = decodeURIComponent(new URL(req.url, "http://127.0.0.1").pathname);
+        } catch (error) {
+            res.writeHead(400);
+            res.end("Bad request");
+            return;
+        }
+
+        const filePath = path.normalize(path.join(root, urlPath));
+
+        if (!filePath.startsWith(root) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+            res.writeHead(404);
+            res.end("Not found");
+            return;
+        }
+
+        res.writeHead(200, { "Content-Type": contentType(filePath) });
+        fs.createReadStream(filePath).pipe(res);
+    });
+
+    return new Promise((resolve) => {
+        server.listen(0, "127.0.0.1", () => {
+            resolve({
+                server,
+                origin: `http://127.0.0.1:${server.address().port}`
+            });
+        });
+    });
+}
+
+function sourceToUrl(resolvedSource, origin) {
+    if (resolvedSource.url) return resolvedSource.url;
+
+    const relativePath = path.relative(root, resolvedSource.filePath).split(path.sep).map(encodeURIComponent).join("/");
+    return `${origin}/${relativePath}${resolvedSource.query || ""}`;
+}
+
+function outputPathFor(item, allItems) {
+    const itemsInSameDir = allItems.filter((other) => other.outputDir === item.outputDir);
+    const index = itemsInSameDir.indexOf(item);
+    const fileName = index <= 0 ? "poster.jpg" : `poster${index + 1}.jpg`;
+
+    return path.join(item.outputDir, fileName);
+}
+
+function isInsideAssets(filePath) {
+    return path.relative(root, filePath).split(path.sep).some((part) => part.toLowerCase() === "assets");
+}
+
+function collectPosterFiles(searchRoot) {
+    return walkFiles(searchRoot, (filePath) => {
+        const fileName = path.basename(filePath).toLowerCase();
+        return /^poster(?:[2-9]\d*)?\.jpg$/.test(fileName) || fileName.endsWith("-poster.jpg");
+    })
+        .filter(matchesTarget)
+        .filter(isInsideAssets)
+        .sort();
+}
+
+function removePosters() {
+    const posterFiles = collectPosterFiles(root);
+
+    if (!posterFiles.length) {
+        console.log(targetFilter ? `No poster files found for: ${targetFilter}` : "No poster files found.");
+        return;
+    }
+
+    for (const posterPath of posterFiles) {
+        fs.unlinkSync(posterPath);
+        console.log(`removed ${path.relative(root, posterPath)}`);
+    }
+}
+
+function hasFfmpeg() {
+    const result = spawnSync("ffmpeg", ["-version"], { encoding: "utf8" });
+    return !result.error && result.status === 0;
+}
+
+function capturePosterWithFfmpeg(item, outputPath) {
+    const source = item.resolvedSource.url || item.resolvedSource.filePath;
+    const vf = `scale=${outputSize.width}:${outputSize.height}:force_original_aspect_ratio=increase,crop=${outputSize.width}:${outputSize.height}`;
+    const args = [
+        "-y",
+        "-ss", String(captureSecond),
+        "-i", source,
+        "-frames:v", "1",
+        "-vf", vf,
+        "-q:v", "2",
+        outputPath
+    ];
+    const result = spawnSync("ffmpeg", args, { encoding: "utf8" });
+
+    if (result.error || result.status !== 0) {
+        const message = result.stderr || result.error?.message || "Unknown ffmpeg error";
+        throw new Error(message.trim().split("\n").slice(-4).join("\n"));
+    }
+}
+
+async function capturePoster(browser, item, outputPath, origin) {
+    const page = await browser.newPage({
+        viewport: outputSize,
+        deviceScaleFactor: 1
+    });
+
+    page.setDefaultTimeout(45000);
+
+    await page.setContent(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,
+body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+}
+video {
+    width: 100vw;
+    height: 100vh;
+    display: block;
+    object-fit: ${objectFit};
+    background: #000;
+}
+</style>
+</head>
+<body>
+<video id="jp-video" muted playsinline preload="auto" crossorigin="anonymous"></video>
+</body>
+</html>`);
+
+    const sourceUrl = sourceToUrl(item.resolvedSource, origin);
+
+    await page.evaluate(async ({ sourceUrl, captureSecond }) => {
+        const video = document.getElementById("jp-video");
+
+        await new Promise((resolve, reject) => {
+            const cleanup = () => {
+                clearTimeout(timer);
+                video.removeEventListener("loadedmetadata", onLoaded);
+                video.removeEventListener("canplay", onLoaded);
+                video.removeEventListener("error", onError);
+            };
+            const onLoaded = () => {
+                cleanup();
+                resolve();
+            };
+            const onError = () => {
+                cleanup();
+                reject(new Error("Could not load video metadata."));
+            };
+            const timer = setTimeout(() => {
+                cleanup();
+                reject(new Error("Video metadata timeout."));
+            }, 30000);
+
+            video.addEventListener("loadedmetadata", onLoaded, { once: true });
+            video.addEventListener("canplay", onLoaded, { once: true });
+            video.addEventListener("error", onError, { once: true });
+            video.src = sourceUrl;
+            video.load();
+        });
+
+        const maxTime = Number.isFinite(video.duration) && video.duration > 0
+            ? Math.max(0, video.duration - 0.05)
+            : captureSecond;
+        const targetTime = Math.min(captureSecond, maxTime);
+
+        await new Promise((resolve, reject) => {
+            const cleanup = () => {
+                clearTimeout(timer);
+                video.removeEventListener("seeked", onSeeked);
+                video.removeEventListener("timeupdate", onSeeked);
+                video.removeEventListener("error", onError);
+            };
+            const onSeeked = () => {
+                cleanup();
+                resolve();
+            };
+            const onError = () => {
+                cleanup();
+                reject(new Error("Could not seek video."));
+            };
+            const timer = setTimeout(() => {
+                cleanup();
+                resolve();
+            }, 8000);
+
+            video.addEventListener("seeked", onSeeked, { once: true });
+            video.addEventListener("timeupdate", onSeeked, { once: true });
+            video.addEventListener("error", onError, { once: true });
+            video.currentTime = targetTime;
+        });
+
+        await video.play().catch(() => {});
+        video.pause();
+
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }, { sourceUrl, captureSecond });
+
+    await page.screenshot({
+        path: outputPath,
+        type: "jpeg",
+        quality,
+        fullPage: false
+    });
+
+    await page.close();
+}
+
+async function main() {
+    validatePathFilters(targetFilters);
+
+    if (shouldRemove) {
+        removePosters();
+        return;
+    }
+
+    const localSources = collectLocalVideos(root);
+    const referencedSources = collectReferenceFiles(root).flatMap(extractVideoReferences);
+    const sources = dedupeSources([...localSources, ...referencedSources]);
+
+    if (!sources.length) {
+        console.error(targetFilter ? `No videos or video references found for: ${targetFilter}` : "No videos or video references found in this folder.");
+        if (targetFilter) console.error("Tip: use / for folder levels, like EN/V1, and match uppercase/lowercase exactly. Combine groups with --and, like EN/V1 --and FR/Product_Test.");
+        process.exit(1);
+    }
+
+    console.log(`jp-poster: ${sources.length} video source(s) | ${outputSize.width}x${outputSize.height} | ${captureSecond}s | ${objectFit}`);
+
+    const useFfmpeg = hasFfmpeg();
+    const { server, origin } = await startStaticServer();
+    const browser = useFfmpeg ? null : await chromium.launch({ headless: true });
+
+    try {
+        for (const item of sources) {
+            const outputPath = outputPathFor(item, sources);
+            fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+            if (useFfmpeg) {
+                capturePosterWithFfmpeg(item, outputPath);
+            } else {
+                await capturePoster(browser, item, outputPath, origin);
+            }
+
+            console.log(`created ${path.relative(root, outputPath)}`);
+        }
+    } finally {
+        if (browser) await browser.close();
+        server.close();
+    }
+}
+
+main().catch((error) => {
+    console.error(error.message || error);
+    process.exit(1);
+});

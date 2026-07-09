@@ -1,0 +1,291 @@
+#!/usr/bin/env node
+
+const fs = require("fs");
+const path = require("path");
+
+const root = process.cwd();
+const useColor = process.stdout.isTTY;
+const c = {
+    reset: useColor ? "\x1b[0m" : "",
+    bold: useColor ? "\x1b[1m" : "",
+    dim: useColor ? "\x1b[2m" : "",
+    cyan: useColor ? "\x1b[36m" : "",
+    green: useColor ? "\x1b[32m" : "",
+    yellow: useColor ? "\x1b[33m" : "",
+    magenta: useColor ? "\x1b[35m" : "",
+    gray: useColor ? "\x1b[90m" : ""
+};
+const ignoredDirs = new Set([".git", ".vscode", ".idea", "node_modules", "_exports", "exports", "dist", "build"]);
+const imageExts = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+
+function title(text) {
+    console.log("");
+    console.log(c.bold + c.cyan + text + c.reset);
+}
+
+function command(signature, description, examples, filters) {
+    console.log(c.green + "  " + signature + c.reset);
+    console.log("    " + description);
+    if (examples && examples.length) {
+        console.log(c.gray + "    exemplos:" + c.reset);
+        examples.forEach((example) => console.log("      " + c.yellow + example + c.reset));
+    }
+    if (filters) {
+        console.log(c.gray + "    filtros avancados:" + c.reset);
+        filters.forEach((line) => console.log("      " + line));
+    }
+    console.log("");
+}
+
+function walkDirs(dir, results = []) {
+    let entries;
+
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        return results;
+    }
+
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (ignoredDirs.has(entry.name)) continue;
+        if (entry.name.startsWith(".")) continue;
+
+        const fullPath = path.join(dir, entry.name);
+        results.push(fullPath);
+        walkDirs(fullPath, results);
+    }
+
+    return results;
+}
+
+function walkFiles(dir, results = []) {
+    let entries;
+
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        return results;
+    }
+
+    for (const entry of entries) {
+        if (entry.isDirectory()) {
+            if (ignoredDirs.has(entry.name)) continue;
+            if (entry.name.startsWith(".")) continue;
+            walkFiles(path.join(dir, entry.name), results);
+            continue;
+        }
+
+        if (entry.isFile()) results.push(path.join(dir, entry.name));
+    }
+
+    return results;
+}
+
+function rel(filePath) {
+    return path.relative(root, filePath).split(path.sep).join("/");
+}
+
+function firstDifferent(items, first) {
+    return items.find((item) => item !== first) || first;
+}
+
+function findIndexFiles() {
+    return walkFiles(root).filter((filePath) => path.basename(filePath).toLowerCase() === "index.html").sort();
+}
+
+function findAssetsDirs() {
+    return [root, ...walkDirs(root)].filter((dir) => {
+        if (path.basename(dir).toLowerCase() !== "assets") return false;
+        return path.basename(path.dirname(dir)).toLowerCase() === "banner" || rel(dir).split("/").includes("banner");
+    }).sort();
+}
+
+function scopeFromIndex(indexPath) {
+    const scope = rel(path.dirname(indexPath));
+    return scope || "";
+}
+
+function scopeFromAssets(assetsDir) {
+    const bannerDir = path.dirname(assetsDir);
+    const scope = rel(path.dirname(bannerDir));
+    return scope || "";
+}
+
+function collectScopes() {
+    const scopes = new Set();
+
+    findIndexFiles().forEach((indexPath) => {
+        const scope = scopeFromIndex(indexPath);
+        if (scope) scopes.add(scope);
+    });
+
+    findAssetsDirs().forEach((assetsDir) => {
+        const scope = scopeFromAssets(assetsDir);
+        if (scope) scopes.add(scope);
+    });
+
+    return Array.from(scopes).sort((a, b) => a.localeCompare(b));
+}
+
+function collectImagePairs() {
+    const pairs = [];
+
+    findAssetsDirs().forEach((assetsDir) => {
+        const scope = scopeFromAssets(assetsDir);
+        if (!scope) return;
+
+        const images = walkFiles(assetsDir)
+            .filter((filePath) => imageExts.has(path.extname(filePath).toLowerCase()))
+            .filter((filePath) => !path.basename(filePath).startsWith(".jp-compress-"))
+            .sort((a, b) => a.localeCompare(b));
+
+        if (images.length) {
+            pairs.push({ scope, image: path.basename(images[0]) });
+        }
+    });
+
+    return pairs.sort((a, b) => a.scope.localeCompare(b.scope));
+}
+
+function buildExamples() {
+    const scopes = collectScopes();
+    const first = scopes[0] || "EN/V1";
+    const second = firstDifferent(scopes, first) || "FR/Product_Test";
+    const third = scopes.find((scope) => scope !== first && scope !== second) || "";
+    const pairs = collectImagePairs();
+    const firstPair = pairs[0] || { scope: first, image: "CTA.png" };
+    const secondPair = pairs.find((pair) => pair.scope !== firstPair.scope || pair.image !== firstPair.image) || { scope: second, image: "chat-2.png" };
+
+    return {
+        hasDetected: scopes.length > 0 || pairs.length > 0,
+        scope1: first,
+        scope2: second,
+        scope3: third,
+        capture: [
+            "jp-capture",
+            "jp-capture msk 3 " + first,
+            "jp-capture dsk 10 " + first,
+            third ? "jp-capture " + first + " --and " + second + " --not " + third : (second !== first ? "jp-capture " + first + " --not " + second : "jp-capture " + first)
+        ],
+        captureRemove: [
+            "jp-capture-remove",
+            second !== first ? "jp-capture-remove " + first + " --and " + second : "jp-capture-remove " + first,
+            second !== first ? "jp-capture-remove " + first + " --not " + second : "jp-capture-remove " + first
+        ],
+        poster: [
+            "jp-poster",
+            second !== first ? "jp-poster 16x9 2 " + first + " --and " + second : "jp-poster 16x9 2 " + first,
+            second !== first ? "jp-poster 300x600 1 " + first + " --not " + second : "jp-poster 300x600 1 " + first
+        ],
+        posterRemove: [
+            "jp-poster-remove",
+            second !== first ? "jp-poster-remove " + first + " --and " + second : "jp-poster-remove " + first,
+            second !== first ? "jp-poster-remove " + first + " --not " + second : "jp-poster-remove " + first
+        ],
+        compress: [
+            "jp-compress 80",
+            second !== first ? "jp-compress 80 " + first + " --and " + second : "jp-compress 80 " + first,
+            firstPair ? "jp-compress 80 " + firstPair.scope + " " + firstPair.image : "jp-compress 80 " + first + " CTA.png",
+            secondPair && secondPair.scope !== firstPair.scope ? "jp-compress 80 " + firstPair.scope + " " + firstPair.image + " --and " + secondPair.scope + " " + secondPair.image : "jp-compress 80 " + firstPair.scope + " " + firstPair.image
+        ],
+        compressOriginal: [
+            "jp-compress-original",
+            firstPair ? "jp-compress-original " + firstPair.scope + " --not " + firstPair.image : "jp-compress-original " + first + " --not CTA.png",
+            secondPair && secondPair.scope !== firstPair.scope ? "jp-compress-original " + firstPair.scope + " --not " + firstPair.image + " --and " + secondPair.scope + " --not " + secondPair.image : "jp-compress-original " + first
+        ],
+        compressOriginalRemove: [
+            "jp-compress-original-remove",
+            second !== first ? "jp-compress-original-remove " + first + " --and " + second : "jp-compress-original-remove " + first,
+            second !== first ? "jp-compress-original-remove " + first + " --not " + second : "jp-compress-original-remove " + first
+        ],
+        detected: [
+            "jp-capture msk 3 " + first,
+            second !== first ? "jp-capture " + first + " --and " + second : "jp-capture " + first,
+            firstPair ? "jp-compress 80 " + firstPair.scope + " " + firstPair.image : "jp-compress 80 " + first + " CTA.png"
+        ]
+    };
+}
+
+const examples = buildExamples();
+
+console.log(c.bold + c.magenta + "JP Tools" + c.reset + c.dim + " - comandos para criativos JustPremium/GumGum" + c.reset);
+console.log("Use dentro da pasta do projeto, DSK, MSK, idioma ou versao. Sem filtro, varre tudo abaixo da pasta atual.");
+console.log(c.bold + "Ordem importa:" + c.reset + " use comando, depois opcoes fixas, depois filtro. Ex: " + c.yellow + examples.capture[1] + c.reset + ", nao " + c.yellow + "jp-capture " + examples.scope1 + " 3 msk" + c.reset + ".");
+console.log("Filtros de pasta/versao usam / para niveis, como " + c.yellow + examples.scope1 + c.reset + ". Nao use espaco para nivel. Filtros sao case-sensitive: " + c.yellow + "text-1.png" + c.reset + " e diferente de " + c.yellow + "TEXT-1.png" + c.reset + ". Use " + c.yellow + "--and" + c.reset + " para somar grupos e " + c.yellow + "--not" + c.reset + " para excluir.");
+
+if (examples.hasDetected) {
+    title("Exemplos Detectados");
+    examples.detected.forEach((example) => console.log("  " + c.yellow + example + c.reset));
+}
+
+title("Capturas visuais");
+command(
+    "jp-capture [msk|dsk] [tempo] [filtro]",
+    "Gera banner/backup.jpg. MSK usa preview 300x600 com barras; DSK usa 1920x1200.",
+    examples.capture,
+    ["Use / para niveis: " + examples.scope1 + "; maiusculas/minusculas precisam bater com a pasta real.", "Aceita varias pastas: " + (examples.scope2 !== examples.scope1 ? "jp-capture " + examples.scope1 + " --and " + examples.scope2 : "jp-capture " + examples.scope1), "Exclui pastas/versoes: " + (examples.scope2 !== examples.scope1 ? "jp-capture " + examples.scope1 + " --not " + examples.scope2 : "jp-capture " + examples.scope1)]
+);
+command(
+    "jp-capture-remove [filtro]",
+    "Remove banner/backup.jpg usando o mesmo filtro de versao/pasta.",
+    examples.captureRemove,
+    ["Aceita varias pastas: " + examples.captureRemove[1], "Exclui pastas/versoes: " + examples.captureRemove[2]]
+);
+
+title("Posters de video");
+command(
+    "jp-poster [proporcao|WxH] [segundos] [filtro]",
+    "Captura poster em banner/assets. Proporcoes: 16x9, 9x16, 1x1, msk, dsk.",
+    examples.poster,
+    ["Use / para niveis: " + examples.scope1 + "; maiusculas/minusculas precisam bater com a pasta real.", "Aceita varias pastas: " + examples.poster[1], "Exclui pastas/versoes: " + examples.poster[2]]
+);
+command(
+    "jp-poster-remove [filtro]",
+    "Remove poster.jpg, poster2.jpg, poster3.jpg... dentro de banner/assets.",
+    examples.posterRemove,
+    ["Aceita varias pastas: " + examples.posterRemove[1], "Exclui pastas/versoes: " + examples.posterRemove[2]]
+);
+
+title("Compressao de imagens");
+command(
+    "jp-compress [qualidade] [filtro --and filtro]",
+    "Comprime jpg/png/webp em banner/assets e tambem banner/backup.jpg. Salva originais em .jp-compress-original ao lado de index.html/banner antes de substituir.",
+    examples.compress,
+    ["Use / para niveis de pasta: " + examples.scope1 + "; filtros sao case-sensitive.", "Imagem precisa de nome completo com extensao e case exato.", "Exemplo por pasta e imagem: " + examples.compress[2]]
+);
+command(
+    "jp-compress-original [filtro --not nomes --and filtro]",
+    "Restaura imagens originais salvas antes do jp-compress e apaga os originais restaurados. Use --not para nao restaurar imagens escolhidas.",
+    examples.compressOriginal,
+    ["Cada grupo pode ter seu proprio --not.", "Imagem precisa de extensao e case exato.", "Sem nomes apos --not, restaura tudo daquela pasta."]
+);
+command(
+    "jp-compress-original-remove [filtro]",
+    "Remove as pastas .jp-compress-original criadas ao lado de index.html/banner quando voce terminou e nao precisa mais restaurar.",
+    examples.compressOriginalRemove,
+    ["Aceita varias pastas: " + examples.compressOriginalRemove[1], "Exclui pastas/versoes: " + examples.compressOriginalRemove[2]]
+);
+
+title("Comandos instalados");
+officialCommands().forEach((name) => console.log("  " + c.green + name + c.reset));
+
+function officialCommands() {
+    return [
+        "jp-capture",
+        "jp-capture-remove",
+        "jp-poster",
+        "jp-poster-remove",
+        "jp-compress",
+        "jp-compress-original",
+        "jp-compress-original-remove",
+        "jp-help"
+    ];
+}
+
+title("Variaveis avancadas");
+console.log("  JP_CAPTURE_WAIT=5000 jp-capture msk");
+console.log("  JP_CAPTURE_QUALITY=90 jp-capture dsk");
+console.log("  JP_POSTER_QUALITY=90 jp-poster 16x9 2");
+console.log("  JP_POSTER_FIT=contain jp-poster 9x16 2");
+console.log("");

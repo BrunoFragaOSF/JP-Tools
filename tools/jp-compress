@@ -1,0 +1,1154 @@
+#!/usr/bin/env node
+
+const fs = require("fs");
+const path = require("path");
+const { spawnSync } = require("child_process");
+
+const root = process.cwd();
+const commandName = path.basename(process.argv[1] || "");
+const ORIGINAL_DIR_NAME = ".jp-compress-original";
+const LEGACY_ORIGINAL_DIR_NAME = ".jp-compress-backup";
+const isRestoreMode = commandName === "jp-compress-original";
+const isRestoreRemoveMode = commandName === "jp-compress-original-remove";
+const isRestoreExceptMode = false;
+const imageExts = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const args = process.argv.slice(2);
+
+const errorColor = process.stderr.isTTY ? {
+    reset: "\x1b[0m",
+    bold: "\x1b[1m",
+    red: "\x1b[31m",
+    yellow: "\x1b[33m"
+} : { reset: "", bold: "", red: "", yellow: "" };
+
+function fail(message, details) {
+    console.error(errorColor.bold + errorColor.red + "JP Tools error:" + errorColor.reset + " " + message);
+
+    (details || []).forEach((line) => {
+        console.error("  " + errorColor.yellow + "-" + errorColor.reset + " " + line);
+    });
+
+    process.exit(1);
+}
+
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    if (isRestoreRemoveMode) {
+        console.log("Usage: jp-compress-original-remove [folderFilter --and folderFilter]");
+        console.log("Examples: jp-compress-original-remove | jp-compress-original-remove EN/V1 --and FR/Product_Test | jp-compress-original-remove FR/Product_Test --and NL/V2 --not DE/Simulated_DSK");
+        console.log("Deletes .jp-compress-original folders next to index.html/banner.");
+        console.log("Advanced filters: use --and/--AND for multiple folders, and --not to exclude.");
+        process.exit(0);
+    }
+
+    if (isRestoreMode) {
+        console.log("Usage: jp-compress-original [folderFilter] [--not imageName.ext, imageName.ext] [--and folderFilter --not imageName.ext]");
+        console.log("Examples: jp-compress-original | jp-compress-original FR/Product_Test --not Logo.png, Cta.png --and NL/V2 --not Headline.png, Text.jpg --and DE/Simulated_DSK");
+        console.log("Restores originals saved before jp-compress ran, then removes restored original files.");
+        console.log("Advanced filters: use --and/--AND for multiple folders; each group can have its own --not.");
+        process.exit(0);
+    }
+
+    console.log("Usage: jp-compress [quality 0-100] [folderFilter imageName.ext --and folderFilter imageName.ext]");
+    console.log("Examples: jp-compress | jp-compress 80 | jp-compress 65 EN/V1 --and NL/V2 | jp-compress 80 EN/V1 CTA.png --and FR/Product_Test Banner.jpg");
+    console.log("Default quality: 80. 0 = worst/smallest, 100 = best/largest.");
+    console.log("Targets jpg, jpeg, png and webp inside banner/assets plus banner/backup.jpg.");
+    console.log("Before replacing an image, saves the original in .jp-compress-original next to index.html/banner.");
+    console.log("Only replaces an image when the compressed file is smaller.");
+    console.log("Advanced filters: folders/versions use / for levels, like EN/V1; use --and for groups and --not to exclude. Filters are case-sensitive. Image filters must use exact filenames with extension, like CTA.png.");
+    process.exit(0);
+}
+
+let qualityArg;
+const filterParts = [];
+
+for (const arg of args) {
+    if (arg.startsWith("-") && arg !== "--not") {
+        filterParts.push(arg);
+        continue;
+    }
+
+    if (!isRestoreMode && !isRestoreRemoveMode) {
+        const numberArg = Number(arg.replace(",", "."));
+
+        if (qualityArg === undefined && filterParts.length === 0 && Number.isFinite(numberArg)) {
+            qualityArg = numberArg;
+            continue;
+        }
+    }
+
+    filterParts.push(arg);
+}
+
+const quality = clamp(Number.isFinite(qualityArg) ? qualityArg : 80, 0, 100);
+const ignoredDirs = new Set([
+    ".git",
+    ".vscode",
+    ".idea",
+    "node_modules",
+    "_exports",
+    "exports",
+    "dist",
+    "build"
+]);
+validateFilterSyntax(filterParts, compressExample("default"));
+let filterGroups = isRestoreMode || isRestoreRemoveMode ? parseRestoreGroups(filterParts) : parseCompressGroups(filterParts);
+let excludedCompressGroups = !isRestoreMode && !isRestoreRemoveMode ? parseCompressExcludeGroups(filterParts) : [];
+const filterLabel = filterParts.join(" ").trim();
+
+validateImageFilterTerms();
+
+
+
+function scopeImagePairs() {
+    const pairs = [];
+
+    collectAssetsDirs().forEach((assetsDir) => {
+        const bannerDir = path.dirname(assetsDir);
+        const scope = path.relative(root, path.dirname(bannerDir));
+        const images = walkFiles(assetsDir)
+            .filter((filePath) => imageExts.has(path.extname(filePath).toLowerCase()))
+            .filter((filePath) => !path.basename(filePath).startsWith(".jp-compress-"))
+            .sort((a, b) => a.localeCompare(b));
+
+        if (scope && images.length) {
+            pairs.push({ scope, image: path.basename(images[0]) });
+        }
+    });
+
+    return pairs.sort((a, b) => a.scope.localeCompare(b.scope));
+}
+
+function pickSecondPair(pairs, first) {
+    return pairs.find((pair) => !first || pair.scope !== first.scope || pair.image !== first.image) || first;
+}
+
+function compressExample(kind) {
+    const pairs = scopeImagePairs();
+    const first = pairs[0] || { scope: "EN/V1", image: "CTA.png" };
+    const second = pickSecondPair(pairs, first) || { scope: "FR/Product_Test", image: "Banner.jpg" };
+
+    if (kind === "scopeExclude" && second && second.scope !== first.scope) {
+        return "jp-compress 80 " + first.scope + " --not " + second.scope;
+    }
+
+    if (kind === "image" && first.scope && first.image) {
+        return "jp-compress 80 " + first.scope + " " + first.image;
+    }
+
+    if (second && second.scope !== first.scope) {
+        return "jp-compress 80 " + first.scope + " " + first.image + " --and " + second.scope + " " + second.image;
+    }
+
+    return "jp-compress 80 " + first.scope + " " + first.image;
+}
+
+function imageTermErrors(groups, property) {
+    const errors = [];
+
+    for (const group of groups) {
+        for (const term of group[property] || []) {
+            if (!hasImageExtension(term)) errors.push(term);
+        }
+    }
+
+    return errors;
+}
+
+function validateImageFilterTerms() {
+    if (isRestoreRemoveMode) return;
+
+    const errors = [];
+
+    errors.push(...imageTermErrors(filterGroups, "terms"));
+    errors.push(...imageTermErrors(filterGroups, "excludes"));
+    errors.push(...imageTermErrors(excludedCompressGroups, "terms"));
+
+    if (!errors.length) return;
+
+    fail("Image or directory filters must be exact.", [
+        "Invalid filter value(s): " + Array.from(new Set(errors)).join(", "),
+        "If it is an image, use the full filename with extension and exact case, like CTA.png.",
+        "If it is a folder/version, use / for levels and exact case, like EN/V1.",
+        "Example: " + compressExample("image")
+    ]);
+}
+
+function clamp(value, min, max) {
+    if (!Number.isFinite(value)) return max;
+    return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function cleanToken(value) {
+    return String(value || "").trim().replace(/^[,]+|[,.;]+$/g, "").trim();
+}
+
+function validateFilterSyntax(parts, example) {
+    let currentHasValue = false;
+    let lastOperator = "";
+
+    for (const part of parts) {
+        const token = cleanToken(part).toLowerCase();
+        if (!token) continue;
+
+        if (token.startsWith("--") && token !== "--and" && token !== "--not") {
+            fail("Unknown filter operator: " + part, [
+                "Use only --and to add another group and --not to exclude.",
+                "Example: " + example
+            ]);
+        }
+
+        if (token === "--and") {
+            if (!currentHasValue) {
+                fail("The --and operator needs a filter before and after it.", [
+                    "Do not leave --and alone or next to another operator.",
+                    "Example: " + example
+                ]);
+            }
+
+            currentHasValue = false;
+            lastOperator = "--and";
+            continue;
+        }
+
+        if (token === "--not") {
+            if (lastOperator === "--and" && !currentHasValue) {
+                fail("The --and operator needs a filter before --not.", [
+                    "Put the folder/version or image after --and, then use --not if needed.",
+                    "Example: " + example
+                ]);
+            }
+
+            if (lastOperator === "--not" && !currentHasValue) {
+                fail("The --not operator needs a filter after it.", [
+                    "Tell JP Tools exactly what should be excluded.",
+                    "Example: " + example
+                ]);
+            }
+
+            currentHasValue = false;
+            lastOperator = "--not";
+            continue;
+        }
+
+        currentHasValue = true;
+        lastOperator = "";
+    }
+
+    if (!currentHasValue && lastOperator) {
+        fail("The " + lastOperator + " operator is missing its filter.", [
+            lastOperator + " cannot be the last part of the command.",
+            "Example: " + example
+        ]);
+    }
+}
+
+function splitAndGroups(parts) {
+    const groups = [];
+    let current = [];
+
+    function pushCurrent() {
+        if (current.length) groups.push(current);
+        current = [];
+    }
+
+    for (const part of parts) {
+        const token = cleanToken(part).toLowerCase();
+
+        if (token === "--and") {
+            pushCurrent();
+            continue;
+        }
+
+        current.push(part);
+    }
+
+    pushCurrent();
+    return groups;
+}
+
+function splitTerms(text) {
+    return String(text || "")
+        .replace(/,/g, " ")
+        .split(/\s+/)
+        .map(cleanToken)
+        .filter(Boolean);
+}
+
+function splitCommaTerms(text) {
+    return String(text || "")
+        .split(",")
+        .map(cleanToken)
+        .filter(Boolean);
+}
+
+function commandExists(command) {
+    const result = process.platform === "win32"
+        ? spawnSync("where", [command], { encoding: "utf8", shell: true })
+        : spawnSync("/bin/sh", ["-c", "command -v " + command], { encoding: "utf8" });
+    return result.status === 0;
+}
+
+function walkDirs(dir, results = []) {
+    let entries;
+
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        return results;
+    }
+
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.name === ORIGINAL_DIR_NAME || entry.name === LEGACY_ORIGINAL_DIR_NAME) {
+            results.push(fullPath);
+            continue;
+        }
+
+        if (ignoredDirs.has(entry.name)) continue;
+        if (entry.name.startsWith(".")) continue;
+
+        results.push(fullPath);
+        walkDirs(fullPath, results);
+    }
+
+    return results;
+}
+
+function walkFiles(dir, results = []) {
+    let entries;
+
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+        return results;
+    }
+
+    for (const entry of entries) {
+        if (entry.isDirectory()) {
+            if (ignoredDirs.has(entry.name)) continue;
+            if (entry.name.startsWith(".") && entry.name !== ORIGINAL_DIR_NAME && entry.name !== LEGACY_ORIGINAL_DIR_NAME) continue;
+            walkFiles(path.join(dir, entry.name), results);
+            continue;
+        }
+
+        if (entry.isFile()) results.push(path.join(dir, entry.name));
+    }
+
+    return results;
+}
+
+function allKnownPaths() {
+    return [root, ...walkDirs(root), ...walkFiles(root)];
+}
+
+function normalizeFilterPath(value) {
+    return cleanToken(value).replace(/[\/]+/g, path.sep);
+}
+
+function slashSuggestion(value) {
+    return cleanToken(value).replace(/\s+/g, path.sep).replace(/[\/]+/g, path.sep);
+}
+
+function pathExistsCaseSensitive(targetPath) {
+    const relative = path.relative(root, path.resolve(targetPath));
+
+    if (!relative || relative === ".") return true;
+    if (relative.startsWith("..") || path.isAbsolute(relative)) return false;
+
+    let current = root;
+
+    for (const segment of relative.split(path.sep).filter(Boolean)) {
+        let entries;
+
+        try {
+            entries = fs.readdirSync(current);
+        } catch (error) {
+            return false;
+        }
+
+        if (!entries.includes(segment)) return false;
+        current = path.join(current, segment);
+    }
+
+    return fs.existsSync(current);
+}
+
+function scopeHasMatches(scope) {
+    if (!scope) return false;
+
+    const normalizedScope = normalizeFilterPath(scope);
+    const targetPath = path.resolve(root, normalizedScope);
+
+    if (pathExistsCaseSensitive(targetPath)) return fs.statSync(targetPath).isDirectory();
+
+    return [root, ...walkDirs(root)].some((itemPath) => path.relative(root, itemPath).includes(normalizedScope));
+}
+
+function looseScopeHasMatches(scope) {
+    const normalizedScope = normalizeFilterPath(scope);
+    const slashScope = slashSuggestion(scope);
+
+    return slashScope !== normalizedScope && scopeHasMatches(slashScope);
+}
+
+function splitScopePrefix(text) {
+    const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+
+    for (let length = words.length - 1; length >= 1; length--) {
+        const scope = words.slice(0, length).join(" ");
+
+        if (scopeHasMatches(scope)) {
+            return {
+                scope,
+                remainder: words.slice(length).join(" ")
+            };
+        }
+    }
+
+    return {
+        scope: cleanToken(text),
+        remainder: ""
+    };
+}
+
+function hasImageExtension(value) {
+    return imageExts.has(path.extname(String(value || "").toLowerCase()));
+}
+
+function parseScopeAndTerms(parts) {
+    const raw = parts.join(" ").replace(/\s+/g, " ").trim();
+
+    if (!raw) return { scope: "", terms: [] };
+
+    if (raw.includes(":")) {
+        const splitIndex = raw.indexOf(":");
+        return {
+            scope: cleanToken(raw.slice(0, splitIndex)),
+            terms: splitTerms(raw.slice(splitIndex + 1))
+        };
+    }
+
+    if (raw.includes(",")) {
+        const commaParts = splitCommaTerms(raw);
+        const first = commaParts.shift() || "";
+        const firstWords = first.split(/\s+/).map(cleanToken).filter(Boolean);
+        const imageStart = firstWords.findIndex(hasImageExtension);
+        let scope = "";
+        let terms = [];
+
+        if (imageStart > -1) {
+            scope = firstWords.slice(0, imageStart).join(" ");
+            terms = firstWords.slice(imageStart);
+        } else if (scopeHasMatches(first)) {
+            scope = cleanToken(first);
+        } else {
+            const split = splitScopePrefix(first);
+            scope = split.scope;
+            terms = splitTerms(split.remainder);
+        }
+
+        terms.push(...commaParts);
+
+        return {
+            scope,
+            terms: terms.map(cleanToken).filter(Boolean)
+        };
+    }
+
+    const words = raw.split(/\s+/).map(cleanToken).filter(Boolean);
+    const imageStart = words.findIndex(hasImageExtension);
+
+    if (imageStart > -1) {
+        return {
+            scope: words.slice(0, imageStart).join(" "),
+            terms: words.slice(imageStart)
+        };
+    }
+
+    if (scopeHasMatches(raw) || looseScopeHasMatches(raw)) {
+        return {
+            scope: cleanToken(raw),
+            terms: []
+        };
+    }
+
+    const split = splitScopePrefix(raw);
+
+    return {
+        scope: split.scope,
+        terms: splitTerms(split.remainder)
+    };
+}
+
+function parseCompressParts(parts) {
+    const includes = [];
+    const excludes = [];
+    let current = [];
+    let mode = "include";
+
+    function pushCurrent() {
+        if (!current.length) return;
+
+        const group = mode === "exclude" && current.length > 1 && !current.some(hasImageExtension)
+            ? { scope: cleanToken(current.join(" ")), terms: [] }
+            : parseScopeAndTerms(current);
+        if (group.scope || group.terms.length) {
+            (mode === "exclude" ? excludes : includes).push(group);
+        }
+        current = [];
+    }
+
+    for (const part of parts) {
+        const token = cleanToken(part).toLowerCase();
+
+        if (token === "--not") {
+            pushCurrent();
+            mode = "exclude";
+            continue;
+        }
+
+        if (token === "--and") {
+            pushCurrent();
+            continue;
+        }
+
+        current.push(part);
+    }
+
+    pushCurrent();
+    return { includes, excludes };
+}
+
+function parseCompressGroups(parts) {
+    return parseCompressParts(parts).includes;
+}
+
+function parseCompressExcludeGroups(parts) {
+    return parseCompressParts(parts).excludes;
+}
+
+function parseRestoreGroup(parts) {
+    const notIndex = parts.findIndex((part) => {
+        const token = cleanToken(part).toLowerCase();
+        return token === "--not";
+    });
+    const scopeParts = notIndex > -1 ? parts.slice(0, notIndex) : parts;
+    const excludeParts = notIndex > -1 ? parts.slice(notIndex + 1) : [];
+    const parsed = parseScopeAndTerms(scopeParts);
+
+    return {
+        scope: parsed.scope,
+        terms: parsed.terms,
+        excludes: splitTerms(excludeParts.join(" "))
+    };
+}
+
+function parseRestoreGroups(parts) {
+    if (isRestoreExceptMode && parts.length) {
+        return [{ scope: "", terms: [], excludes: splitTerms(parts.join(" ")) }];
+    }
+
+    return splitAndGroups(parts).map(parseRestoreGroup).filter((group) => group.scope || group.terms.length || group.excludes.length);
+}
+
+function isInside(childPath, parentPath) {
+    return childPath === parentPath || childPath.startsWith(parentPath + path.sep);
+}
+
+function isAssetsDir(dir) {
+    if (path.basename(dir).toLowerCase() !== "assets") return false;
+
+    const parts = path.relative(root, dir).split(path.sep).map((part) => part.toLowerCase());
+    return parts.includes("banner") || path.basename(path.dirname(dir)).toLowerCase() === "banner";
+}
+
+function isCompressBackupDir(dir) {
+    const base = path.basename(dir);
+    if (base !== ORIGINAL_DIR_NAME && base !== LEGACY_ORIGINAL_DIR_NAME) return false;
+
+    const parentDir = path.dirname(dir);
+
+    if (path.basename(parentDir).toLowerCase() === "banner") return true;
+
+    return fs.existsSync(path.join(parentDir, "banner"));
+}
+
+function backupDirIsLegacyBanner(backupDir) {
+    return path.basename(path.dirname(backupDir)).toLowerCase() === "banner";
+}
+
+function backupScopePath(backupDir) {
+    if (backupDirIsLegacyBanner(backupDir)) return path.dirname(backupDir);
+    return path.dirname(backupDir);
+}
+
+function originalPathFromBackup(backupDir, backupFile) {
+    const baseDir = backupDirIsLegacyBanner(backupDir)
+        ? path.dirname(backupDir)
+        : path.dirname(backupDir);
+
+    return path.join(baseDir, path.relative(backupDir, backupFile));
+}
+
+function findBannerDir(filePath) {
+    let current = fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()
+        ? filePath
+        : path.dirname(filePath);
+    const parsedRoot = path.parse(current).root;
+
+    while (current && current !== parsedRoot) {
+        if (path.basename(current).toLowerCase() === "banner") return current;
+        current = path.dirname(current);
+    }
+
+    return null;
+}
+
+function scopeMatchesPath(filePath, scope) {
+    if (!scope) return true;
+
+    const normalizedScope = normalizeFilterPath(scope);
+    const targetPath = path.resolve(root, normalizedScope);
+    const bannerDir = findBannerDir(filePath) || path.dirname(filePath);
+
+    if (pathExistsCaseSensitive(targetPath)) {
+        const stats = fs.statSync(targetPath);
+
+        if (stats.isDirectory()) {
+            return isInside(filePath, targetPath) || isInside(bannerDir, targetPath);
+        }
+
+        return false;
+    }
+
+    return path.relative(root, bannerDir).includes(normalizedScope);
+}
+
+function termsMatchPath(filePath, terms) {
+    if (!terms.length) return true;
+
+    const bannerDir = findBannerDir(filePath) || root;
+    const relative = path.relative(bannerDir, filePath);
+    const fileName = path.basename(filePath);
+
+    return terms.some((term) => {
+        const needle = cleanToken(term);
+        if (!hasImageExtension(needle)) return false;
+        return fileName === needle || relative === needle || relative.endsWith(path.sep + needle);
+    });
+}
+
+function termsMatchPathCaseInsensitive(filePath, terms) {
+    if (!terms.length) return true;
+
+    const bannerDir = findBannerDir(filePath) || root;
+    const relative = path.relative(bannerDir, filePath).toLowerCase();
+    const fileName = path.basename(filePath).toLowerCase();
+
+    return terms.some((term) => {
+        const needle = cleanToken(term).toLowerCase();
+        if (!hasImageExtension(needle)) return false;
+        return fileName === needle || relative === needle || relative.endsWith(path.sep + needle);
+    });
+}
+
+function groupMatchesPath(filePath, group) {
+    return scopeMatchesPath(filePath, group.scope) && termsMatchPath(filePath, group.terms || []);
+}
+
+function pathExcludedByGroup(filePath, group) {
+    return termsMatchPath(filePath, group.excludes || []) && (group.excludes || []).length > 0;
+}
+
+function matchesAnyGroup(filePath, groups) {
+    if (!groups.length) return true;
+    return groups.some((group) => groupMatchesPath(filePath, group));
+}
+
+function collectAssetsDirs() {
+    const candidates = [root, ...walkDirs(root)]
+        .filter(isAssetsDir)
+        .sort();
+
+    return Array.from(new Set(candidates));
+}
+
+function collectBackupImages(assetsDirs) {
+    const backups = [];
+
+    for (const assetsDir of assetsDirs) {
+        const bannerDir = path.dirname(assetsDir);
+        const backupPath = path.join(bannerDir, "backup.jpg");
+
+        if (!fs.existsSync(backupPath)) continue;
+        if (!imageExts.has(path.extname(backupPath).toLowerCase())) continue;
+
+        backups.push(backupPath);
+    }
+
+    return backups;
+}
+
+function collectAllImages(assetsDirs) {
+    const assetsImages = assetsDirs.flatMap((assetsDir) => walkFiles(assetsDir))
+        .filter((filePath) => imageExts.has(path.extname(filePath).toLowerCase()))
+        .filter((filePath) => !path.basename(filePath).startsWith(".jp-compress-"));
+    const backupImages = collectBackupImages(assetsDirs);
+
+    return Array.from(new Set([...assetsImages, ...backupImages])).sort();
+}
+
+function collectImages(assetsDirs, allImages) {
+    return (allImages || collectAllImages(assetsDirs))
+        .filter((filePath) => matchesAnyGroup(filePath, filterGroups))
+        .filter((filePath) => !(excludedCompressGroups.length && matchesAnyGroup(filePath, excludedCompressGroups)))
+        .sort();
+}
+
+function backupPathFor(filePath) {
+    const bannerDir = findBannerDir(filePath);
+
+    if (!bannerDir) return null;
+
+    const versionDir = path.dirname(bannerDir);
+
+    return path.join(versionDir, ORIGINAL_DIR_NAME, path.relative(versionDir, filePath));
+}
+
+function saveCompressionOriginal(filePath) {
+    const originalPath = backupPathFor(filePath);
+
+    if (!originalPath || fs.existsSync(originalPath)) return;
+
+    fs.mkdirSync(path.dirname(originalPath), { recursive: true });
+    fs.copyFileSync(filePath, originalPath);
+}
+
+function fileSize(filePath) {
+    return fs.statSync(filePath).size;
+}
+
+function run(command, args) {
+    return spawnSync(command, args, { encoding: "utf8" });
+}
+
+function tempPathFor(filePath, suffix) {
+    const dir = path.dirname(filePath);
+    const ext = path.extname(filePath);
+    const base = path.basename(filePath, ext);
+    return path.join(dir, ".jp-compress-" + process.pid + "-" + base + suffix + ext);
+}
+
+function replaceIfSmaller(originalPath, candidatePath) {
+    if (!fs.existsSync(candidatePath)) return { changed: false, reason: "no-output" };
+
+    const before = fileSize(originalPath);
+    const after = fileSize(candidatePath);
+
+    if (after > 0 && after < before) {
+        fs.renameSync(candidatePath, originalPath);
+        return { changed: true, before, after };
+    }
+
+    fs.rmSync(candidatePath, { force: true });
+    return { changed: false, before, after };
+}
+
+function compressJpeg(filePath) {
+    const tempPath = tempPathFor(filePath, "-jpg");
+    fs.copyFileSync(filePath, tempPath);
+
+    if (commandExists("jpegoptim")) {
+        const args = ["--strip-all", "--max=" + quality, "--quiet", tempPath];
+        const result = run("jpegoptim", args);
+        if (result.status !== 0) fs.rmSync(tempPath, { force: true });
+    } else if (commandExists("magick")) {
+        run("magick", [filePath, "-strip", "-quality", String(quality), tempPath]);
+    } else if (commandExists("ffmpeg")) {
+        const qscale = Math.round(31 - (quality / 100) * 29);
+        const ffmpegTemp = tempPathFor(filePath, "-ffmpeg");
+        run("ffmpeg", ["-y", "-i", filePath, "-q:v", String(qscale), ffmpegTemp]);
+        fs.rmSync(tempPath, { force: true });
+        return replaceIfSmaller(filePath, ffmpegTemp);
+    }
+
+    return replaceIfSmaller(filePath, tempPath);
+}
+
+function pngquantRange() {
+    const max = quality;
+    const min = Math.max(0, Math.min(max, quality - 15));
+    return min + "-" + max;
+}
+
+function compressPng(filePath) {
+    let candidatePath = tempPathFor(filePath, "-png");
+    fs.copyFileSync(filePath, candidatePath);
+
+    if (quality < 100 && commandExists("pngquant")) {
+        const quantPath = tempPathFor(filePath, "-quant");
+        const result = run("pngquant", [
+            "--force",
+            "--skip-if-larger",
+            "--quality", pngquantRange(),
+            "--output", quantPath,
+            filePath
+        ]);
+
+        if (result.status === 0 && fs.existsSync(quantPath)) {
+            fs.rmSync(candidatePath, { force: true });
+            candidatePath = quantPath;
+        } else {
+            fs.rmSync(quantPath, { force: true });
+        }
+    }
+
+    if (commandExists("oxipng")) {
+        const level = quality >= 90 ? "2" : quality >= 70 ? "3" : "4";
+        run("oxipng", ["-q", "-o", level, "--strip", "safe", candidatePath]);
+    } else if (quality < 100 && commandExists("magick")) {
+        const magickPath = tempPathFor(filePath, "-magick");
+        run("magick", [filePath, "-strip", "-quality", String(quality), "PNG8:" + magickPath]);
+        if (fs.existsSync(magickPath)) {
+            fs.rmSync(candidatePath, { force: true });
+            candidatePath = magickPath;
+        }
+    }
+
+    return replaceIfSmaller(filePath, candidatePath);
+}
+
+function compressWebp(filePath) {
+    const tempPath = tempPathFor(filePath, "-webp");
+
+    if (commandExists("cwebp")) {
+        run("cwebp", ["-quiet", "-q", String(quality), filePath, "-o", tempPath]);
+    } else if (commandExists("magick")) {
+        run("magick", [filePath, "-strip", "-quality", String(quality), tempPath]);
+    } else if (commandExists("ffmpeg")) {
+        run("ffmpeg", ["-y", "-i", filePath, "-quality", String(quality), tempPath]);
+    }
+
+    return replaceIfSmaller(filePath, tempPath);
+}
+
+function compressFile(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+
+    if (ext === ".jpg" || ext === ".jpeg") return compressJpeg(filePath);
+    if (ext === ".png") return compressPng(filePath);
+    if (ext === ".webp") return compressWebp(filePath);
+
+    return { changed: false, reason: "unsupported" };
+}
+
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + "B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + "KB";
+    return (bytes / 1024 / 1024).toFixed(2) + "MB";
+}
+
+function collectCompressBackupDirs() {
+    const candidates = [root, ...walkDirs(root)]
+        .filter(isCompressBackupDir)
+        .filter((backupDir) => {
+            if (!filterGroups.length) return true;
+
+            const scopePath = backupScopePath(backupDir);
+            return filterGroups.some((group) => {
+                if (!scopeMatchesPath(scopePath, group.scope)) return false;
+
+                if (isRestoreRemoveMode) {
+                    return !(group.excludes || []).some((exclude) => scopeMatchesPath(scopePath, exclude));
+                }
+
+                return !pathExcludedByGroup(scopePath, group);
+            });
+        })
+        .sort();
+
+    return Array.from(new Set(candidates));
+}
+
+function collectRestoreEntries() {
+    const backupDirs = collectCompressBackupDirs();
+    const entriesByOriginalPath = new Map();
+
+    for (const backupDir of backupDirs) {
+        const backupFiles = walkFiles(backupDir)
+            .filter((filePath) => imageExts.has(path.extname(filePath).toLowerCase()))
+            .sort();
+
+        for (const backupFile of backupFiles) {
+            const originalPath = originalPathFromBackup(backupDir, backupFile);
+
+            if (filterGroups.length) {
+                const shouldRestore = filterGroups.some((group) => {
+                    if (!groupMatchesPath(originalPath, group)) return false;
+                    return !pathExcludedByGroup(originalPath, group);
+                });
+
+                if (!shouldRestore) continue;
+            }
+
+            const existing = entriesByOriginalPath.get(originalPath);
+            const currentIsNewOriginal = path.basename(backupDir) === ORIGINAL_DIR_NAME;
+            const existingIsLegacy = existing && path.basename(existing.backupDir) === LEGACY_ORIGINAL_DIR_NAME;
+
+            if (!existing || (currentIsNewOriginal && existingIsLegacy)) {
+                entriesByOriginalPath.set(originalPath, { backupDir, backupFile, originalPath });
+            }
+        }
+    }
+
+    return Array.from(entriesByOriginalPath.values()).sort((a, b) => a.originalPath.localeCompare(b.originalPath));
+}
+
+function pruneEmptyDirs(dir) {
+    if (!fs.existsSync(dir)) return;
+
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+            pruneEmptyDirs(path.join(dir, entry.name));
+        }
+    }
+
+    try {
+        if (!fs.readdirSync(dir).length) {
+            fs.rmdirSync(dir);
+        }
+    } catch (error) {}
+}
+
+function restoreCompressedImages() {
+    let entries = collectRestoreEntries();
+
+    if (!entries.length && filterGroups.length === 1 && filterGroups[0].scope && !filterGroups[0].terms.length && !filterGroups[0].excludes.length) {
+        filterGroups = [{ scope: "", terms: [], excludes: splitTerms(filterGroups[0].scope) }];
+        entries = collectRestoreEntries();
+
+        if (entries.length) {
+            console.log("No folder/file backup matched. Treating arguments as --not filters.");
+        }
+    }
+
+    if (!entries.length) {
+        console.log(filterLabel ? "No jp-compress originals found for: " + filterLabel : "No jp-compress originals found.");
+        return;
+    }
+
+    const touchedBackupDirs = new Set();
+
+    for (const entry of entries) {
+        fs.mkdirSync(path.dirname(entry.originalPath), { recursive: true });
+        fs.copyFileSync(entry.backupFile, entry.originalPath);
+        fs.rmSync(entry.backupFile, { force: true });
+        touchedBackupDirs.add(entry.backupDir);
+        console.log("restored " + path.relative(root, entry.originalPath));
+    }
+
+    for (const backupDir of touchedBackupDirs) {
+        pruneEmptyDirs(backupDir);
+    }
+
+    console.log("done: restored " + entries.length + " image" + (entries.length === 1 ? "" : "s") + ".");
+}
+
+function removeCompressionBackups() {
+    const backupDirs = collectCompressBackupDirs();
+
+    if (!backupDirs.length) {
+        console.log(filterLabel ? "No jp-compress original folders found for: " + filterLabel : "No jp-compress original folders found.");
+        return;
+    }
+
+    for (const backupDir of backupDirs) {
+        fs.rmSync(backupDir, { recursive: true, force: true });
+        console.log("removed " + path.relative(root, backupDir));
+    }
+
+    console.log("done: removed " + backupDirs.length + " original folder" + (backupDirs.length === 1 ? "" : "s") + ".");
+}
+
+function scopeCandidatesFromImages(allImages) {
+    const candidates = new Set();
+
+    allImages.forEach((filePath) => {
+        const bannerDir = findBannerDir(filePath);
+        if (!bannerDir) return;
+
+        candidates.add(path.relative(root, bannerDir));
+        candidates.add(path.relative(root, path.dirname(bannerDir)));
+        candidates.add(path.relative(root, path.dirname(filePath)));
+    });
+
+    return Array.from(candidates).filter(Boolean).sort();
+}
+
+function findSimilarScope(scope, candidates) {
+    const exact = normalizeFilterPath(scope);
+    const slash = slashSuggestion(scope);
+    const exactLower = exact.toLowerCase();
+    const slashLower = slash.toLowerCase();
+
+    if (slash !== exact) {
+        const slashMatch = candidates.find((candidate) => candidate.includes(slash));
+        if (slashMatch) return { reason: "slash", value: slashMatch };
+    }
+
+    const exactMatch = candidates.find((candidate) => candidate.includes(exact));
+    if (exactMatch) return { reason: "exact", value: exactMatch };
+
+    const caseMatch = candidates.find((candidate) => candidate.toLowerCase().includes(exactLower) || candidate.toLowerCase().includes(slashLower));
+    if (caseMatch) return { reason: "case", value: caseMatch };
+
+    return null;
+}
+
+function describeMissingScope(scope, candidates) {
+    const similar = findSimilarScope(scope, candidates);
+
+    if (similar && similar.reason === "slash") {
+        return "Folder/version filter not found: " + scope + ". Did you mean " + similar.value + "? Use / for folder levels.";
+    }
+
+    if (similar && similar.reason === "case") {
+        return "Folder/version filter not found: " + scope + ". Found similar path with different uppercase/lowercase: " + similar.value + ". Filters are case-sensitive.";
+    }
+
+    return "Folder/version filter not found: " + scope + ". Filters are case-sensitive and must use / for levels, like EN/V2.";
+}
+
+function describeMissingImage(term, scopedImages, scope) {
+    const similar = scopedImages.find((filePath) => termsMatchPathCaseInsensitive(filePath, [term]));
+
+    if (similar) {
+        return "Image case mismatch" + (scope ? " in " + scope : "") + ": wrote " + term + ", found " + path.basename(similar) + ". Image filters are case-sensitive.";
+    }
+
+    return "Image not found" + (scope ? " in " + scope : "") + ": " + term;
+}
+
+function validateCompressFilterTargets(allImages) {
+    if (!filterLabel) return;
+
+    const scopeErrors = [];
+    const imageErrors = [];
+    const scopeCandidates = scopeCandidatesFromImages(allImages);
+    const checkGroups = [
+        ...filterGroups.map((group) => ({ group, type: "include" })),
+        ...excludedCompressGroups.map((group) => ({ group, type: "exclude" }))
+    ];
+
+    for (const item of checkGroups) {
+        const group = item.group;
+        const scopedImages = allImages.filter((filePath) => scopeMatchesPath(filePath, group.scope));
+
+        if (group.scope && !scopedImages.length) {
+            scopeErrors.push(describeMissingScope(group.scope, scopeCandidates));
+            continue;
+        }
+
+        for (const term of group.terms || []) {
+            const found = scopedImages.some((filePath) => termsMatchPath(filePath, [term]));
+
+            if (!found) {
+                imageErrors.push(describeMissingImage(term, scopedImages, group.scope));
+            }
+        }
+    }
+
+    if (!scopeErrors.length && !imageErrors.length) return;
+
+    const details = [
+        ...Array.from(new Set(scopeErrors)),
+        ...Array.from(new Set(imageErrors))
+    ];
+
+    if (scopeErrors.length) {
+        details.push("Folder/version filters must use / for levels and exact uppercase/lowercase, like EN/V1.");
+        details.push("Example: " + compressExample("scopeExclude"));
+    }
+
+    if (imageErrors.length) {
+        details.push("Image filters must use exact existing filenames with extension and exact uppercase/lowercase, like CTA.png.");
+        details.push("Example: " + compressExample("image"));
+    }
+
+    fail("Invalid jp-compress filter.", details);
+}
+
+function compressImages() {
+    const assetsDirs = collectAssetsDirs();
+
+    if (!assetsDirs.length) {
+        if (filterLabel) {
+            fail("No banner/assets folders found before applying the filter.", [
+                "Run jp-compress inside the project, DSK/MSK folder, language folder or version folder.",
+                "Example: " + compressExample("image")
+            ]);
+        }
+
+        console.log("No banner/assets folders found.");
+        return;
+    }
+
+    const allImages = collectAllImages(assetsDirs);
+    validateCompressFilterTargets(allImages);
+    const images = collectImages(assetsDirs, allImages);
+
+    if (!images.length) {
+        if (filterLabel) {
+            fail("No jpg/png/webp images matched the filter: " + filterLabel, [
+                "Use / for folder levels, like EN/V1.",
+                "Use exact existing image filenames, like CTA.png.",
+                "Example: " + compressExample("default")
+            ]);
+        }
+
+        console.log("No jpg/png/webp images found in banner/assets or banner/backup.jpg.");
+        return;
+    }
+
+    const backupCount = images.filter((imagePath) => path.basename(imagePath).toLowerCase() === "backup.jpg" && path.basename(path.dirname(imagePath)).toLowerCase() === "banner").length;
+    const scopeLabel = assetsDirs.length + " assets folder(s)" + (backupCount ? " + " + backupCount + " backup.jpg" : "") + " | originals saved";
+    console.log("jp-compress: " + images.length + " image(s) | quality " + quality + " | " + scopeLabel);
+
+    let totalBefore = 0;
+    let totalAfter = 0;
+    let changedCount = 0;
+
+    for (const imagePath of images) {
+        saveCompressionOriginal(imagePath);
+        const before = fileSize(imagePath);
+        const result = compressFile(imagePath);
+        const after = fileSize(imagePath);
+        totalBefore += before;
+        totalAfter += after;
+
+        const relative = path.relative(root, imagePath);
+        if (result.changed) {
+            changedCount += 1;
+            const saving = before - after;
+            const percent = ((saving / before) * 100).toFixed(1);
+            console.log("compressed " + relative + " " + formatBytes(before) + " -> " + formatBytes(after) + " (" + percent + "%)");
+        } else {
+            console.log("kept " + relative + " " + formatBytes(before));
+        }
+    }
+
+    const totalSaving = totalBefore - totalAfter;
+    const totalPercent = totalBefore ? ((totalSaving / totalBefore) * 100).toFixed(1) : "0.0";
+    console.log("done: " + changedCount + "/" + images.length + " changed | " + formatBytes(totalBefore) + " -> " + formatBytes(totalAfter) + " (" + totalPercent + "%)");
+}
+
+if (isRestoreRemoveMode) {
+    removeCompressionBackups();
+} else if (isRestoreMode) {
+    restoreCompressedImages();
+} else {
+    compressImages();
+}

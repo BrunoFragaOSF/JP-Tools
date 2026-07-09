@@ -1,8 +1,19 @@
 # JP Tools
 
+**Versao atual:** `1.1.0`
+
 Ferramentas de terminal para acelerar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK/MSK.
 
-A ideia deste repositorio ser publico e simples: qualquer pessoa pode abrir os scripts, ler o que eles fazem e conferir que nao existe nada escondido. O instalador copia os comandos para o computador e instala dependencias necessarias para captura, poster e compressao.
+Este repositorio e publico para facilitar a instalacao e permitir que qualquer pessoa confira o codigo antes de usar. Os scripts ficam abertos nas pastas `tools/` e `scripts/`, entao o time pode revisar o funcionamento sempre que quiser.
+
+## Download
+
+Baixe a pasta compactada pela aba **Releases** do GitHub.
+
+1. Abra a release mais recente.
+2. Baixe o arquivo compactado do JP Tools.
+3. Descompacte a pasta.
+4. Rode o instalador do seu sistema.
 
 ## Uso Mais Comum
 
@@ -20,11 +31,34 @@ Eles cobrem o fluxo principal:
 - `jp-poster`: gera posters de videos em `banner/assets`.
 - `jp-compress`: comprime imagens e salva backup dos originais.
 
+O JP Tools deve ser usado dentro da pasta do projeto, DSK, MSK, idioma ou versao. Sem filtro, ele varre tudo abaixo da pasta atual. Com filtro, ele processa apenas as pastas/versoes indicadas.
+
+Exemplo de estrutura comum:
+
+```text
+Projeto/
+  EN/V1/index.html
+  EN/V1/banner/assets/
+  EN/V2/index.html
+  EN/V2/banner/assets/
+  FR/Product_Test/index.html
+```
+
+Exemplos de uso:
+
+```bash
+jp-capture msk 3 EN/V1
+jp-poster 16x9 2 EN/V1 --and EN/V2
+jp-compress 80 EN/V1 CTA.png
+```
+
+Os comandos foram feitos para falhar quando algo parece errado. Se um filtro de pasta, versao ou imagem nao existir, ou se o nome estiver com maiuscula/minuscula diferente, o erro tenta explicar o problema e sugerir um exemplo usando pastas reais do projeto.
+
 Os outros comandos sao complementos avancados para remover capturas/posters, restaurar imagens originais ou limpar backups.
 
 ## Instalacao
 
-Baixe este repositorio como `.zip`, descompacte e use apenas um dos arquivos abaixo.
+Depois de baixar a pasta compactada pela **Release**, descompacte e use apenas um dos arquivos abaixo.
 
 ### Mac
 
@@ -51,6 +85,28 @@ INSTALL-WINDOWS.bat
 ```
 
 Se Node acabou de ser instalado e ainda nao entrou no `PATH`, abra um novo terminal e rode o instalador novamente.
+
+## O Que Cada Pasta Faz
+
+```text
+INSTALL-MAC.command          instalador amigavel para Mac
+INSTALL-WINDOWS.bat          instalador amigavel para Windows
+UNINSTALL-MAC.command        desinstalador amigavel para Mac
+UNINSTALL-WINDOWS.bat        desinstalador amigavel para Windows
+scripts/                     scripts internos chamados pelos instaladores
+tools/                       comandos JP Tools instalados no computador
+```
+
+A pasta `scripts/` e necessaria. Os arquivos da raiz sao os atalhos que a pessoa clica; eles chamam os scripts internos para fazer a instalacao/desinstalacao de verdade.
+
+A pasta `tools/` contem os comandos principais:
+
+```text
+tools/jp-capture
+tools/jp-poster
+tools/jp-compress
+tools/jp-help
+```
 
 ## Teste Apos Instalar
 
@@ -246,28 +302,7 @@ jp-help
 
 O diferencial e que ele tenta detectar a estrutura da pasta atual e exibir exemplos reais com os nomes encontrados ali.
 
-## Estrutura do Repositorio
-
-```text
-JP Tools Installer/
-  INSTALL-MAC.command
-  INSTALL-WINDOWS.bat
-  UNINSTALL-MAC.command
-  UNINSTALL-WINDOWS.bat
-  README.md
-  scripts/
-    install-mac.command
-    install-windows.ps1
-    uninstall-mac.command
-    uninstall-windows.ps1
-  tools/
-    jp-capture
-    jp-poster
-    jp-compress
-    jp-help
-```
-
-## Transparencia e Seguranca
+## Transparencia
 
 Este projeto e aberto para que o time consiga conferir o codigo antes de instalar.
 
@@ -276,7 +311,7 @@ Alguns pontos importantes:
 - Os comandos sao scripts locais.
 - O instalador copia os scripts para `~/bin` no Mac ou `%USERPROFILE%\\bin` no Windows.
 - O instalador baixa dependencias conhecidas, como Node, Playwright, Chromium, FFmpeg e ImageMagick.
-- Nao existe coleta de dados, login proprio, servidor proprio ou telemetria nestes scripts.
+- Nao existe servidor proprio ou telemetria nestes scripts.
 - Antes de instalar, voce pode abrir qualquer arquivo em `tools/` ou `scripts/` e revisar linha por linha.
 
 ## Limitacoes
@@ -288,7 +323,7 @@ Alguns pontos importantes:
 
 ## Atualizacao
 
-Para atualizar, baixe a versao mais recente e rode novamente:
+Para atualizar, baixe a release mais recente e rode novamente:
 
 ```text
 INSTALL-MAC.command

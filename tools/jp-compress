@@ -49,36 +49,86 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
     }
 
     console.log("Usage: jp-compress [quality 0-100] [folderFilter imageName.ext --and folderFilter imageName.ext]");
-    console.log("Examples: jp-compress | jp-compress 80 | jp-compress 65 EN/V1 --and NL/V2 | jp-compress 80 EN/V1 CTA.png --and FR/Product_Test Banner.jpg");
+    console.log("Examples: jp-compress | jp-compress 80 | jp-compress 65 EN/V1 --and 70 NL/V2 | jp-compress 80 EN/V1 CTA.png --and FR/Product_Test Banner.jpg");
     console.log("Default quality: 80. 0 = worst/smallest, 100 = best/largest.");
     console.log("Targets jpg, jpeg, png and webp inside banner/assets plus banner/backup.jpg.");
     console.log("Before replacing an image, saves the original in .jp-compress-original next to index.html/banner.");
     console.log("Only replaces an image when the compressed file is smaller.");
     console.log("Advanced filters: folders/versions use / for levels, like EN/V1; use --and for groups and --not to exclude. Filters are case-sensitive. Image filters must use exact filenames with extension, like CTA.png.");
+    console.log("Settings: quality before the first filter becomes the default. After --and, it applies only to that group, like jp-compress 80 EN/V1 --and 70 FR/V2.");
     process.exit(0);
 }
 
-let qualityArg;
-const filterParts = [];
-
-for (const arg of args) {
-    if (arg.startsWith("-") && arg !== "--not") {
-        filterParts.push(arg);
-        continue;
-    }
-
-    if (!isRestoreMode && !isRestoreRemoveMode) {
-        const numberArg = Number(arg.replace(",", "."));
-
-        if (qualityArg === undefined && filterParts.length === 0 && Number.isFinite(numberArg)) {
-            qualityArg = numberArg;
-            continue;
-        }
-    }
-
-    filterParts.push(arg);
+function parseFixedNumber(value) {
+    return Number(String(value || "").replace(",", "."));
 }
 
+function parseCompressArgs(args) {
+    if (isRestoreMode || isRestoreRemoveMode) {
+        return { qualityArg: undefined, filterParts: args.slice(), targetGroups: [] };
+    }
+
+    let qualityArg;
+    const filterParts = [];
+    const targetGroups = [];
+    let currentGroup = { filterParts: [], qualityArg: undefined };
+    let atGroupStart = true;
+    let mode = "include";
+
+    function pushGroup() {
+        const filter = currentGroup.filterParts.map(cleanToken).filter(Boolean).join(" ");
+        if (filter || currentGroup.qualityArg !== undefined) {
+            targetGroups.push({
+                filterParts: currentGroup.filterParts.slice(),
+                qualityArg: currentGroup.qualityArg
+            });
+        }
+        currentGroup = { filterParts: [], qualityArg: undefined };
+    }
+
+    for (const arg of args) {
+        const token = cleanToken(arg);
+        const lowerArg = token.toLowerCase();
+        const numberArg = parseFixedNumber(token);
+
+        if (lowerArg === "--and") {
+            pushGroup();
+            filterParts.push(arg);
+            atGroupStart = true;
+            mode = "include";
+            continue;
+        }
+
+        if (lowerArg === "--not") {
+            pushGroup();
+            filterParts.push(arg);
+            atGroupStart = false;
+            mode = "exclude";
+            continue;
+        }
+
+        if (mode === "include" && atGroupStart && Number.isFinite(numberArg)) {
+            if (!filterParts.length && !currentGroup.filterParts.length && qualityArg === undefined) {
+                qualityArg = numberArg;
+            } else {
+                currentGroup.qualityArg = numberArg;
+            }
+            continue;
+        }
+
+        filterParts.push(arg);
+        if (mode === "include") currentGroup.filterParts.push(arg);
+        atGroupStart = false;
+    }
+
+    pushGroup();
+
+    return { qualityArg, filterParts, targetGroups };
+}
+
+const parsedArgs = parseCompressArgs(args);
+const qualityArg = parsedArgs.qualityArg;
+const filterParts = parsedArgs.filterParts;
 const quality = clamp(Number.isFinite(qualityArg) ? qualityArg : 80, 0, 100);
 const ignoredDirs = new Set([
     ".git",
@@ -93,6 +143,10 @@ const ignoredDirs = new Set([
 validateFilterSyntax(filterParts, compressExample("default"));
 let filterGroups = isRestoreMode || isRestoreRemoveMode ? parseRestoreGroups(filterParts) : parseCompressGroups(filterParts);
 let excludedCompressGroups = !isRestoreMode && !isRestoreRemoveMode ? parseCompressExcludeGroups(filterParts) : [];
+const compressQualityGroups = !isRestoreMode && !isRestoreRemoveMode ? parsedArgs.targetGroups.map((item) => ({
+    group: parseScopeAndTerms(item.filterParts),
+    quality: clamp(Number.isFinite(item.qualityArg) ? item.qualityArg : quality, 0, 100)
+})).filter((item) => item.group.scope || item.group.terms.length) : [];
 const filterLabel = filterParts.join(" ").trim();
 
 validateImageFilterTerms();
@@ -668,6 +722,16 @@ function matchesAnyGroup(filePath, groups) {
     return groups.some((group) => groupMatchesPath(filePath, group));
 }
 
+function qualityForImage(filePath) {
+    const match = compressQualityGroups.find((item) => groupMatchesPath(filePath, item.group));
+    return match ? match.quality : quality;
+}
+
+function qualitySummaryLabel() {
+    const values = Array.from(new Set([quality, ...compressQualityGroups.map((item) => item.quality)]));
+    return values.length === 1 ? String(values[0]) : values.join(", ");
+}
+
 function collectAssetsDirs() {
     const candidates = [root, ...walkDirs(root)]
         .filter(isAssetsDir)
@@ -757,18 +821,18 @@ function replaceIfSmaller(originalPath, candidatePath) {
     return { changed: false, before, after };
 }
 
-function compressJpeg(filePath) {
+function compressJpeg(filePath, imageQuality) {
     const tempPath = tempPathFor(filePath, "-jpg");
     fs.copyFileSync(filePath, tempPath);
 
     if (commandExists("jpegoptim")) {
-        const args = ["--strip-all", "--max=" + quality, "--quiet", tempPath];
+        const args = ["--strip-all", "--max=" + imageQuality, "--quiet", tempPath];
         const result = run("jpegoptim", args);
         if (result.status !== 0) fs.rmSync(tempPath, { force: true });
     } else if (commandExists("magick")) {
-        run("magick", [filePath, "-strip", "-quality", String(quality), tempPath]);
+        run("magick", [filePath, "-strip", "-quality", String(imageQuality), tempPath]);
     } else if (commandExists("ffmpeg")) {
-        const qscale = Math.round(31 - (quality / 100) * 29);
+        const qscale = Math.round(31 - (imageQuality / 100) * 29);
         const ffmpegTemp = tempPathFor(filePath, "-ffmpeg");
         run("ffmpeg", ["-y", "-i", filePath, "-q:v", String(qscale), ffmpegTemp]);
         fs.rmSync(tempPath, { force: true });
@@ -778,22 +842,22 @@ function compressJpeg(filePath) {
     return replaceIfSmaller(filePath, tempPath);
 }
 
-function pngquantRange() {
-    const max = quality;
-    const min = Math.max(0, Math.min(max, quality - 15));
+function pngquantRange(imageQuality) {
+    const max = imageQuality;
+    const min = Math.max(0, Math.min(max, imageQuality - 15));
     return min + "-" + max;
 }
 
-function compressPng(filePath) {
+function compressPng(filePath, imageQuality) {
     let candidatePath = tempPathFor(filePath, "-png");
     fs.copyFileSync(filePath, candidatePath);
 
-    if (quality < 100 && commandExists("pngquant")) {
+    if (imageQuality < 100 && commandExists("pngquant")) {
         const quantPath = tempPathFor(filePath, "-quant");
         const result = run("pngquant", [
             "--force",
             "--skip-if-larger",
-            "--quality", pngquantRange(),
+            "--quality", pngquantRange(imageQuality),
             "--output", quantPath,
             filePath
         ]);
@@ -807,11 +871,11 @@ function compressPng(filePath) {
     }
 
     if (commandExists("oxipng")) {
-        const level = quality >= 90 ? "2" : quality >= 70 ? "3" : "4";
+        const level = imageQuality >= 90 ? "2" : imageQuality >= 70 ? "3" : "4";
         run("oxipng", ["-q", "-o", level, "--strip", "safe", candidatePath]);
-    } else if (quality < 100 && commandExists("magick")) {
+    } else if (imageQuality < 100 && commandExists("magick")) {
         const magickPath = tempPathFor(filePath, "-magick");
-        run("magick", [filePath, "-strip", "-quality", String(quality), "PNG8:" + magickPath]);
+        run("magick", [filePath, "-strip", "-quality", String(imageQuality), "PNG8:" + magickPath]);
         if (fs.existsSync(magickPath)) {
             fs.rmSync(candidatePath, { force: true });
             candidatePath = magickPath;
@@ -821,26 +885,26 @@ function compressPng(filePath) {
     return replaceIfSmaller(filePath, candidatePath);
 }
 
-function compressWebp(filePath) {
+function compressWebp(filePath, imageQuality) {
     const tempPath = tempPathFor(filePath, "-webp");
 
     if (commandExists("cwebp")) {
-        run("cwebp", ["-quiet", "-q", String(quality), filePath, "-o", tempPath]);
+        run("cwebp", ["-quiet", "-q", String(imageQuality), filePath, "-o", tempPath]);
     } else if (commandExists("magick")) {
-        run("magick", [filePath, "-strip", "-quality", String(quality), tempPath]);
+        run("magick", [filePath, "-strip", "-quality", String(imageQuality), tempPath]);
     } else if (commandExists("ffmpeg")) {
-        run("ffmpeg", ["-y", "-i", filePath, "-quality", String(quality), tempPath]);
+        run("ffmpeg", ["-y", "-i", filePath, "-quality", String(imageQuality), tempPath]);
     }
 
     return replaceIfSmaller(filePath, tempPath);
 }
 
-function compressFile(filePath) {
+function compressFile(filePath, imageQuality) {
     const ext = path.extname(filePath).toLowerCase();
 
-    if (ext === ".jpg" || ext === ".jpeg") return compressJpeg(filePath);
-    if (ext === ".png") return compressPng(filePath);
-    if (ext === ".webp") return compressWebp(filePath);
+    if (ext === ".jpg" || ext === ".jpeg") return compressJpeg(filePath, imageQuality);
+    if (ext === ".png") return compressPng(filePath, imageQuality);
+    if (ext === ".webp") return compressWebp(filePath, imageQuality);
 
     return { changed: false, reason: "unsupported" };
 }
@@ -1115,7 +1179,7 @@ function compressImages() {
 
     const backupCount = images.filter((imagePath) => path.basename(imagePath).toLowerCase() === "backup.jpg" && path.basename(path.dirname(imagePath)).toLowerCase() === "banner").length;
     const scopeLabel = assetsDirs.length + " assets folder(s)" + (backupCount ? " + " + backupCount + " backup.jpg" : "") + " | originals saved";
-    console.log("jp-compress: " + images.length + " image(s) | quality " + quality + " | " + scopeLabel);
+    console.log("jp-compress: " + images.length + " image(s) | quality " + qualitySummaryLabel() + " | " + scopeLabel);
 
     let totalBefore = 0;
     let totalAfter = 0;
@@ -1124,7 +1188,8 @@ function compressImages() {
     for (const imagePath of images) {
         saveCompressionOriginal(imagePath);
         const before = fileSize(imagePath);
-        const result = compressFile(imagePath);
+        const imageQuality = qualityForImage(imagePath);
+        const result = compressFile(imagePath, imageQuality);
         const after = fileSize(imagePath);
         totalBefore += before;
         totalAfter += after;

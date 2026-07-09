@@ -57,41 +57,119 @@ const presetSizes = {
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
     console.log("Usage: jp-poster [16x9|9x16|1x1|WxH] [seconds] [folderFilter]");
     console.log("       jp-poster-remove [folderFilter]");
-    console.log("Examples: jp-poster 16x9 2 | jp-poster 9x16 5 EN/V1 --and NL/V2 --not DE/Simulated_DSK | jp-poster 300x600 1");
+    console.log("Examples: jp-poster 16x9 2 | jp-poster 9x16 5 EN/V1 --and 2 NL/V2 --not DE/Simulated_DSK | jp-poster 300x600 1");
     console.log("          jp-poster-remove | jp-poster-remove FR/Product_Test --and NL/V2 | jp-poster-remove FR/Product_Test --not DE/Simulated_DSK");
     console.log("Default size: 16x9. Default time: 1s.");
     console.log("Finds local videos and video URLs referenced in index/banner HTML, JS or JSON.");
     console.log("Output: banner/assets/poster.jpg, poster2.jpg, poster3.jpg... for each unique video source.");
     console.log("Advanced filters: use / for folder levels, --and/--AND for multiple folders, and --not to exclude. Filters are case-sensitive.");
+    console.log("Settings: size/time before the first filter become defaults. After --and, they apply only to that group, like jp-poster 5 V1 --and 2 V2.");
     console.log("Advanced override: JP_POSTER_QUALITY=90 JP_POSTER_FIT=cover");
     process.exit(0);
 }
 
-let sizeArg;
-let secondArg;
-const targetParts = [];
-
-for (const arg of rawArgs) {
-    const lowerArg = arg.toLowerCase();
-    const numberArg = Number(arg.replace(",", "."));
-
-    if (!sizeArg && targetParts.length === 0 && (presetSizes[lowerArg] || /^\d+x\d+$/i.test(lowerArg))) {
-        sizeArg = lowerArg;
-        continue;
-    }
-
-    if (secondArg === undefined && targetParts.length === 0 && Number.isFinite(numberArg)) {
-        secondArg = numberArg;
-        continue;
-    }
-
-    targetParts.push(arg);
+function isPosterSizeOption(value) {
+    const lowerValue = String(value || "").toLowerCase();
+    return Boolean(presetSizes[lowerValue] || /^\d+x\d+$/i.test(lowerValue));
 }
+
+function parseFixedNumber(value) {
+    return Number(String(value || "").replace(",", "."));
+}
+
+function parsePosterArgs(args) {
+    if (commandIsRemove) {
+        return { sizeArg: undefined, secondArg: undefined, targetParts: args.slice(), targetGroups: [] };
+    }
+
+    let sizeArg;
+    let secondArg;
+    const targetParts = [];
+    const targetGroups = [];
+    let currentGroup = { filterParts: [], sizeArg: undefined, secondArg: undefined };
+    let atGroupStart = true;
+    let mode = "include";
+
+    function pushGroup() {
+        const filter = cleanFilter(currentGroup.filterParts.join(" "));
+        if (filter || currentGroup.sizeArg || currentGroup.secondArg !== undefined) {
+            targetGroups.push({
+                filter,
+                sizeArg: currentGroup.sizeArg,
+                secondArg: currentGroup.secondArg
+            });
+        }
+        currentGroup = { filterParts: [], sizeArg: undefined, secondArg: undefined };
+    }
+
+    for (const arg of args) {
+        const token = cleanFilter(arg);
+        const lowerArg = token.toLowerCase();
+        const numberArg = parseFixedNumber(token);
+
+        if (lowerArg === "--and") {
+            pushGroup();
+            targetParts.push(arg);
+            atGroupStart = true;
+            mode = "include";
+            continue;
+        }
+
+        if (lowerArg === "--not") {
+            pushGroup();
+            targetParts.push(arg);
+            atGroupStart = false;
+            mode = "exclude";
+            continue;
+        }
+
+        if (mode === "include" && atGroupStart && isPosterSizeOption(lowerArg)) {
+            if (!targetParts.length && !currentGroup.filterParts.length && !sizeArg) {
+                sizeArg = lowerArg;
+            } else {
+                currentGroup.sizeArg = lowerArg;
+            }
+            continue;
+        }
+
+        if (mode === "include" && atGroupStart && Number.isFinite(numberArg)) {
+            if (!targetParts.length && !currentGroup.filterParts.length && secondArg === undefined) {
+                secondArg = numberArg;
+            } else {
+                currentGroup.secondArg = numberArg;
+            }
+            continue;
+        }
+
+        targetParts.push(arg);
+        if (mode === "include") currentGroup.filterParts.push(arg);
+        atGroupStart = false;
+    }
+
+    pushGroup();
+
+    return { sizeArg, secondArg, targetParts, targetGroups };
+}
+
+const parsedArgs = parsePosterArgs(rawArgs);
+const sizeArg = parsedArgs.sizeArg;
+const secondArg = parsedArgs.secondArg;
+const targetParts = parsedArgs.targetParts;
+const defaultOutputSize = parseSize(sizeArg || "16x9");
+const defaultCaptureSecond = Math.max(0, Number.isFinite(secondArg) ? secondArg : 1);
+const defaultPosterConfig = {
+    filter: "",
+    outputSize: defaultOutputSize,
+    captureSecond: defaultCaptureSecond
+};
+const posterGroups = parsedArgs.targetGroups.map((group) => ({
+    filter: group.filter,
+    outputSize: parseSize(group.sizeArg || sizeArg || "16x9"),
+    captureSecond: Math.max(0, Number.isFinite(group.secondArg) ? group.secondArg : defaultCaptureSecond)
+}));
 
 const targetFilter = targetParts.join(" ").trim();
 const targetFilters = splitPathFilters(targetParts);
-const outputSize = parseSize(sizeArg || "16x9");
-const captureSecond = Math.max(0, Number.isFinite(secondArg) ? secondArg : 1);
 const quality = clamp(Number(process.env.JP_POSTER_QUALITY || 90), 1, 100);
 const objectFit = (process.env.JP_POSTER_FIT || "cover").toLowerCase() === "contain" ? "contain" : "cover";
 
@@ -684,6 +762,31 @@ function collectPosterFiles(searchRoot) {
         .sort();
 }
 
+function posterConfigForItem(item) {
+    const matchPaths = [
+        item.sourceFile,
+        item.outputDir,
+        item.resolvedSource && item.resolvedSource.filePath
+    ].filter(Boolean);
+
+    const group = posterGroups.find((candidate) => {
+        if (!candidate.filter) return false;
+        return matchPaths.some((filePath) => matchPathFilter(filePath, candidate.filter));
+    });
+
+    return group || defaultPosterConfig;
+}
+
+function posterSettingsLabel(config) {
+    return config.outputSize.width + "x" + config.outputSize.height + " @ " + config.captureSecond + "s";
+}
+
+function posterSummaryLabel() {
+    const groups = posterGroups.length ? posterGroups : [defaultPosterConfig];
+    const labels = Array.from(new Set(groups.map(posterSettingsLabel)));
+    return labels.length === 1 ? labels[0] : labels.join(", ");
+}
+
 function removePosters() {
     const posterFiles = collectPosterFiles(root);
 
@@ -703,8 +806,10 @@ function hasFfmpeg() {
     return !result.error && result.status === 0;
 }
 
-function capturePosterWithFfmpeg(item, outputPath) {
+function capturePosterWithFfmpeg(item, outputPath, posterConfig) {
     const source = item.resolvedSource.url || item.resolvedSource.filePath;
+    const outputSize = posterConfig.outputSize;
+    const captureSecond = posterConfig.captureSecond;
     const vf = `scale=${outputSize.width}:${outputSize.height}:force_original_aspect_ratio=increase,crop=${outputSize.width}:${outputSize.height}`;
     const args = [
         "-y",
@@ -723,7 +828,9 @@ function capturePosterWithFfmpeg(item, outputPath) {
     }
 }
 
-async function capturePoster(browser, item, outputPath, origin) {
+async function capturePoster(browser, item, outputPath, origin, posterConfig) {
+    const outputSize = posterConfig.outputSize;
+    const captureSecond = posterConfig.captureSecond;
     const page = await browser.newPage({
         viewport: outputSize,
         deviceScaleFactor: 1
@@ -855,7 +962,7 @@ async function main() {
         process.exit(1);
     }
 
-    console.log(`jp-poster: ${sources.length} video source(s) | ${outputSize.width}x${outputSize.height} | ${captureSecond}s | ${objectFit}`);
+    console.log(`jp-poster: ${sources.length} video source(s) | ${posterSummaryLabel()} | ${objectFit}`);
 
     const useFfmpeg = hasFfmpeg();
     const { server, origin } = await startStaticServer();
@@ -866,13 +973,15 @@ async function main() {
             const outputPath = outputPathFor(item, sources);
             fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
+            const posterConfig = posterConfigForItem(item);
+
             if (useFfmpeg) {
-                capturePosterWithFfmpeg(item, outputPath);
+                capturePosterWithFfmpeg(item, outputPath, posterConfig);
             } else {
-                await capturePoster(browser, item, outputPath, origin);
+                await capturePoster(browser, item, outputPath, origin, posterConfig);
             }
 
-            console.log(`created ${path.relative(root, outputPath)}`);
+            console.log(`created ${path.relative(root, outputPath)} (${posterSettingsLabel(posterConfig)})`);
         }
     } finally {
         if (browser) await browser.close();

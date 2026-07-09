@@ -28,13 +28,104 @@ function command(signature, description, examples, filters) {
     console.log("    " + description);
     if (examples && examples.length) {
         console.log(c.gray + "    exemplos:" + c.reset);
-        examples.forEach((example) => console.log("      " + c.yellow + example + c.reset));
+        examples.forEach((example) => console.log("      " + colorExample(example)));
     }
     if (filters) {
         console.log(c.gray + "    filtros avancados:" + c.reset);
         filters.forEach((line) => console.log("      " + line));
     }
     console.log("");
+}
+
+function colorText(color, value) {
+    return color + value + c.reset;
+}
+
+function commandText(value) {
+    return colorText(c.green, value);
+}
+
+function optionText(value) {
+    return colorText(c.cyan, value);
+}
+
+function filterText(value) {
+    return colorText(c.yellow, value);
+}
+
+function operatorText(value) {
+    return colorText(c.magenta, value);
+}
+
+function isNumberToken(token) {
+    return /^-?\d+(?:[,.]\d+)?$/.test(String(token || ""));
+}
+
+function isPosterSizeToken(token) {
+    return /^(?:16x9|9x16|1x1|square|msk|dsk)$/i.test(token) || /^\d+x\d+$/i.test(token);
+}
+
+function isCaptureModeToken(token) {
+    return /^(?:msk|dsk|mobile|desktop)$/i.test(token);
+}
+
+function globalOptionKind(commandName, token) {
+    if (commandName === "jp-capture") {
+        if (isCaptureModeToken(token)) return "format";
+        if (isNumberToken(token)) return "wait";
+    }
+
+    if (commandName === "jp-poster") {
+        if (isPosterSizeToken(token)) return "size";
+        if (isNumberToken(token)) return "seconds";
+    }
+
+    if (commandName === "jp-compress") {
+        if (isNumberToken(token)) return "quality";
+    }
+
+    return "";
+}
+
+function globalOptionKey(kind, token) {
+    const value = isNumberToken(token)
+        ? String(Number(String(token).replace(",", ".")))
+        : String(token || "").toLowerCase();
+    return kind + ":" + value;
+}
+
+function colorExample(example) {
+    const tokens = String(example || "").trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return "";
+
+    const commandName = tokens[0];
+    const seenOptions = new Set();
+    let filterStarted = false;
+    let afterAnd = false;
+
+    return tokens.map((token, index) => {
+        const lowerToken = token.toLowerCase();
+
+        if (index === 0) return commandText(token);
+
+        if (lowerToken === "--and" || lowerToken === "--not") {
+            afterAnd = lowerToken === "--and";
+            if (lowerToken === "--not") filterStarted = true;
+            return operatorText(token);
+        }
+
+        const optionKind = globalOptionKind(commandName, token);
+        const optionKey = optionKind ? globalOptionKey(optionKind, token) : "";
+
+        if (optionKind && (!filterStarted || afterAnd)) {
+            seenOptions.add(optionKey);
+            return optionText(token);
+        }
+
+        filterStarted = true;
+        afterAnd = false;
+        return filterText(token);
+    }).join(" ");
 }
 
 function walkDirs(dir, results = []) {
@@ -175,7 +266,7 @@ function buildExamples() {
         ],
         poster: [
             "jp-poster",
-            second !== first ? "jp-poster 16x9 2 " + first + " --and " + second : "jp-poster 16x9 2 " + first,
+            second !== first ? "jp-poster 16x9 5 " + first + " --and 2 " + second : "jp-poster 16x9 5 " + first,
             second !== first ? "jp-poster 300x600 1 " + first + " --not " + second : "jp-poster 300x600 1 " + first
         ],
         posterRemove: [
@@ -185,7 +276,7 @@ function buildExamples() {
         ],
         compress: [
             "jp-compress 80",
-            second !== first ? "jp-compress 80 " + first + " --and " + second : "jp-compress 80 " + first,
+            second !== first ? "jp-compress 80 " + first + " --and 70 " + second : "jp-compress 80 " + first,
             firstPair ? "jp-compress 80 " + firstPair.scope + " " + firstPair.image : "jp-compress 80 " + first + " CTA.png",
             secondPair && secondPair.scope !== firstPair.scope ? "jp-compress 80 " + firstPair.scope + " " + firstPair.image + " --and " + secondPair.scope + " " + secondPair.image : "jp-compress 80 " + firstPair.scope + " " + firstPair.image
         ],
@@ -211,12 +302,17 @@ const examples = buildExamples();
 
 console.log(c.bold + c.magenta + "JP Tools" + c.reset + c.dim + " - comandos para criativos JustPremium/GumGum" + c.reset);
 console.log("Use dentro da pasta do projeto, DSK, MSK, idioma ou versao. Sem filtro, varre tudo abaixo da pasta atual.");
-console.log(c.bold + "Ordem importa:" + c.reset + " use comando, depois opcoes fixas, depois filtro. Ex: " + c.yellow + examples.capture[1] + c.reset + ", nao " + c.yellow + "jp-capture " + examples.scope1 + " 3 msk" + c.reset + ".");
-console.log("Filtros de pasta/versao usam / para niveis, como " + c.yellow + examples.scope1 + c.reset + ". Nao use espaco para nivel. Filtros sao case-sensitive: " + c.yellow + "text-1.png" + c.reset + " e diferente de " + c.yellow + "TEXT-1.png" + c.reset + ". Use " + c.yellow + "--and" + c.reset + " para somar grupos e " + c.yellow + "--not" + c.reset + " para excluir.");
+console.log(c.bold + "Como ler um comando:" + c.reset);
+console.log("  " + commandText("Comando") + ": a acao que voce quer rodar, como " + commandText("jp-poster") + " ou " + commandText("jp-compress") + ".");
+console.log("  " + optionText("Ajuste") + ": formato, proporcao, tempo ou qualidade. Normalmente fica antes do filtro; no jp-poster e jp-compress pode mudar por grupo depois de --and.");
+console.log("  " + filterText("Filtro") + ": pasta, versao ou imagem exata que sera processada. Combine grupos com " + operatorText("--and") + " e exclua com " + operatorText("--not") + ".");
+console.log(c.bold + "Ordem importa:" + c.reset + " use " + commandText("comando") + ", depois " + optionText("ajustes") + ", depois " + filterText("filtros") + ". Ex: " + colorExample(examples.capture[1]) + ", nao " + colorExample("jp-capture " + examples.scope1 + " 3 msk") + ".");
+console.log("No jp-poster e jp-compress, ajustes antes do primeiro filtro viram padrao. Depois de " + operatorText("--and") + ", voce pode trocar o ajuste daquele grupo. Ex: " + colorExample("jp-poster 5 " + examples.scope1 + " --and 2 " + examples.scope2) + " ou " + colorExample("jp-compress 80 " + examples.scope1 + " --and 70 " + examples.scope2) + ". Se nao usar ajuste em um grupo, ele herda o padrao do comando.");
+console.log("Filtros de pasta/versao usam / para niveis, como " + filterText(examples.scope1) + ". Nao use espaco para nivel. Filtros sao case-sensitive: " + filterText("text-1.png") + " e diferente de " + filterText("TEXT-1.png") + ".");
 
 if (examples.hasDetected) {
     title("Exemplos Detectados");
-    examples.detected.forEach((example) => console.log("  " + c.yellow + example + c.reset));
+    examples.detected.forEach((example) => console.log("  " + colorExample(example)));
 }
 
 title("Capturas visuais");
@@ -224,13 +320,13 @@ command(
     "jp-capture [msk|dsk] [tempo] [filtro]",
     "Gera banner/backup.jpg. MSK usa preview 300x600 com barras; DSK usa 1920x1200.",
     examples.capture,
-    ["Use / para niveis: " + examples.scope1 + "; maiusculas/minusculas precisam bater com a pasta real.", "Aceita varias pastas: " + (examples.scope2 !== examples.scope1 ? "jp-capture " + examples.scope1 + " --and " + examples.scope2 : "jp-capture " + examples.scope1), "Exclui pastas/versoes: " + (examples.scope2 !== examples.scope1 ? "jp-capture " + examples.scope1 + " --not " + examples.scope2 : "jp-capture " + examples.scope1)]
+    ["Use / para niveis: " + filterText(examples.scope1) + "; maiusculas/minusculas precisam bater com a pasta real.", "Aceita varias pastas: " + colorExample(examples.scope2 !== examples.scope1 ? "jp-capture " + examples.scope1 + " --and " + examples.scope2 : "jp-capture " + examples.scope1), "Exclui pastas/versoes: " + colorExample(examples.scope2 !== examples.scope1 ? "jp-capture " + examples.scope1 + " --not " + examples.scope2 : "jp-capture " + examples.scope1)]
 );
 command(
     "jp-capture-remove [filtro]",
     "Remove banner/backup.jpg usando o mesmo filtro de versao/pasta.",
     examples.captureRemove,
-    ["Aceita varias pastas: " + examples.captureRemove[1], "Exclui pastas/versoes: " + examples.captureRemove[2]]
+    ["Aceita varias pastas: " + colorExample(examples.captureRemove[1]), "Exclui pastas/versoes: " + colorExample(examples.captureRemove[2])]
 );
 
 title("Posters de video");
@@ -238,13 +334,13 @@ command(
     "jp-poster [proporcao|WxH] [segundos] [filtro]",
     "Captura poster em banner/assets. Proporcoes: 16x9, 9x16, 1x1, msk, dsk.",
     examples.poster,
-    ["Use / para niveis: " + examples.scope1 + "; maiusculas/minusculas precisam bater com a pasta real.", "Aceita varias pastas: " + examples.poster[1], "Exclui pastas/versoes: " + examples.poster[2]]
+    ["Use / para niveis: " + filterText(examples.scope1) + "; maiusculas/minusculas precisam bater com a pasta real.", "Aceita varias pastas: " + colorExample(examples.poster[1]), "Exclui pastas/versoes: " + colorExample(examples.poster[2])]
 );
 command(
     "jp-poster-remove [filtro]",
     "Remove poster.jpg, poster2.jpg, poster3.jpg... dentro de banner/assets.",
     examples.posterRemove,
-    ["Aceita varias pastas: " + examples.posterRemove[1], "Exclui pastas/versoes: " + examples.posterRemove[2]]
+    ["Aceita varias pastas: " + colorExample(examples.posterRemove[1]), "Exclui pastas/versoes: " + colorExample(examples.posterRemove[2])]
 );
 
 title("Compressao de imagens");
@@ -252,7 +348,7 @@ command(
     "jp-compress [qualidade] [filtro --and filtro]",
     "Comprime jpg/png/webp em banner/assets e tambem banner/backup.jpg. Salva originais em .jp-compress-original ao lado de index.html/banner antes de substituir.",
     examples.compress,
-    ["Use / para niveis de pasta: " + examples.scope1 + "; filtros sao case-sensitive.", "Imagem precisa de nome completo com extensao e case exato.", "Exemplo por pasta e imagem: " + examples.compress[2]]
+    ["Use / para niveis de pasta: " + filterText(examples.scope1) + "; filtros sao case-sensitive.", "Imagem precisa de nome completo com extensao e case exato.", "Exemplo por pasta e imagem: " + colorExample(examples.compress[2])]
 );
 command(
     "jp-compress-original [filtro --not nomes --and filtro]",
@@ -264,7 +360,7 @@ command(
     "jp-compress-original-remove [filtro]",
     "Remove as pastas .jp-compress-original criadas ao lado de index.html/banner quando voce terminou e nao precisa mais restaurar.",
     examples.compressOriginalRemove,
-    ["Aceita varias pastas: " + examples.compressOriginalRemove[1], "Exclui pastas/versoes: " + examples.compressOriginalRemove[2]]
+    ["Aceita varias pastas: " + colorExample(examples.compressOriginalRemove[1]), "Exclui pastas/versoes: " + colorExample(examples.compressOriginalRemove[2])]
 );
 
 title("Comandos instalados");

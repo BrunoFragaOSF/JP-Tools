@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.0`
+**Versao atual:** `1.1.0`
 
 Ferramentas de terminal para acelerar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK/MSK.
 
@@ -31,6 +31,8 @@ Eles cobrem o fluxo principal:
 - `jp-poster`: gera posters de videos em `banner/assets`.
 - `jp-compress`: comprime imagens e salva backup dos originais.
 
+Novidade da versao `1.1.0`: no `jp-poster` e no `jp-compress`, ajustes depois de `--and` podem mudar apenas aquele grupo. Assim da para capturar posters em segundos diferentes ou comprimir grupos com qualidades diferentes no mesmo comando.
+
 O JP Tools deve ser usado dentro da pasta do projeto, DSK, MSK, idioma ou versao. Sem filtro, ele varre tudo abaixo da pasta atual. Com filtro, ele processa apenas as pastas/versoes indicadas.
 
 Exemplo de estrutura comum:
@@ -48,8 +50,8 @@ Exemplos de uso:
 
 ```bash
 jp-capture msk 3 EN/V1
-jp-poster 16x9 2 EN/V1 --and EN/V2
-jp-compress 80 EN/V1 CTA.png
+jp-poster 16x9 5 EN/V1 --and 2 EN/V2
+jp-compress 80 EN/V1 CTA.png --and 70 EN/V2 CTA.png
 ```
 
 Os comandos foram feitos para falhar quando algo parece errado. Se um filtro de pasta, versao ou imagem nao existir, ou se o nome estiver com maiuscula/minuscula diferente, o erro tenta explicar o problema e sugerir um exemplo usando pastas reais do projeto.
@@ -146,11 +148,13 @@ No Windows, algumas otimizacoes podem depender do que estiver disponivel no sist
 
 Os filtros sao rigidos para evitar erro silencioso em producao.
 
-- A ordem importa: comando, opcoes fixas, depois filtro.
+- A ordem importa: comando, ajustes, depois filtro.
 - Pastas e versoes usam `/` para niveis: `EN/V1`, nao `EN V1`.
 - Filtros sao case-sensitive: `text-1.png` e diferente de `TEXT-1.png`.
 - `--and` soma grupos.
 - `--not` exclui grupos.
+- No `jp-poster`, proporcao/tempo antes do primeiro filtro viram padrao; depois de `--and`, podem mudar apenas aquele grupo.
+- No `jp-compress`, qualidade antes do primeiro filtro vira padrao; depois de `--and`, pode mudar apenas aquele grupo.
 - No `jp-compress`, imagem precisa ter nome completo, extensao, case exato e existir.
 
 Exemplos:
@@ -158,8 +162,8 @@ Exemplos:
 ```bash
 jp-capture msk 3 EN/V1
 jp-capture EN/V1 --and FR/Product_Test --not DE/Simulated_DSK
-jp-poster 16x9 2 EN/V1 --and NL/V2
-jp-compress 80 EN/V1 CTA.png --and NL/V2 chat-2.png
+jp-poster 16x9 5 EN/V1 --and 2 NL/V2
+jp-compress 80 EN/V1 CTA.png --and 70 NL/V2 chat-2.png
 ```
 
 Se voce digitar algo errado, os comandos tentam explicar o motivo e sugerir um exemplo baseado nas pastas reais da pasta atual.
@@ -216,9 +220,15 @@ Gera `poster.jpg`, `poster2.jpg`, `poster3.jpg` etc. em `banner/assets`, buscand
 ```bash
 jp-poster
 jp-poster 16x9 2 EN/V1
-jp-poster 9x16 5 EN/V1 --and NL/V2
+jp-poster 9x16 5 EN/V1 --and 2 NL/V2
 jp-poster 300x600 1 FR/Product_Test
 ```
+
+Ajustes por grupo:
+
+- `jp-poster 5 EN/V1 --and 2 NL/V2` captura `EN/V1` no segundo `5` e `NL/V2` no segundo `2`.
+- `jp-poster 5 EN/V1 --and NL/V2` usa `5` segundos nos dois grupos.
+- A proporcao tambem pode mudar por grupo quando for informada depois de `--and`.
 
 Formatos aceitos:
 
@@ -257,7 +267,7 @@ jp-compress
 jp-compress 80
 jp-compress 65 EN/V1
 jp-compress 80 EN/V1 CTA.png
-jp-compress 80 EN/V1 CTA.png --and NL/V2 chat-2.png
+jp-compress 80 EN/V1 CTA.png --and 70 NL/V2 chat-2.png
 ```
 
 Qualidade:
@@ -265,6 +275,11 @@ Qualidade:
 - padrao: `80`
 - minimo: `0`
 - maximo: `100`
+
+Ajustes por grupo:
+
+- `jp-compress 80 EN/V1 --and 70 NL/V2` usa qualidade `80` em `EN/V1` e `70` em `NL/V2`.
+- `jp-compress 80 EN/V1 --and NL/V2` usa qualidade `80` nos dois grupos.
 
 O comando so substitui a imagem se o resultado comprimido for menor.
 

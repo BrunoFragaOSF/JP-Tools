@@ -24,11 +24,12 @@ const chromium = loadPlaywright();
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
     console.log("Usage: jp-capture [msk|dsk] [waitSeconds] [folderFilter]");
-        console.log("Examples: jp-capture msk 3 EN/V1 | jp-capture dsk 10 dsk_spider-v1 | jp-capture EN/V1 --and FR/Product_Test");
+        console.log("Examples: jp-capture msk 3 EN/V1 | jp-capture dsk 10 dsk_spider-v1 | jp-capture msk 3 EN/V1 --and msk 3 FR/Product_Test");
         console.log("          jp-capture-remove | jp-capture-remove FR/Product_Test --and NL/V2");
     console.log("Default: auto-detects DSK from the current path, otherwise MSK.");
     console.log("Default wait: 3s. folderFilter must use / for folder levels, like EN/V1, and is case-sensitive.");
     console.log("Advanced filters: use --and/--AND for multiple folders, and --not to exclude. Example: EN/V1 --and FR/Product_Test --not DE/Simulated_DSK");
+    console.log("Global settings: format/wait apply to all filters. You may repeat the same value after --and, like jp-capture msk 3 EN/V1 --and msk 3 FR/V2.");
     console.log("MSK uses a stable 300x600 preview with ADVERTISEMENT/main/Scroll for more bars.");
     console.log("Advanced override: JP_CAPTURE_WAIT=3500 JP_CAPTURE_QUALITY=90");
     process.exit(0);
@@ -64,26 +65,82 @@ function fail(message, details) {
     process.exit(1);
 }
 
-let requestedMode = "auto";
-let waitArg;
-const targetParts = [];
-
-for (const arg of captureArgs) {
-    const lowerArg = arg.toLowerCase();
-    const numberArg = Number(arg);
-
-    if (requestedMode === "auto" && modeNames.has(lowerArg)) {
-        requestedMode = lowerArg;
-        continue;
-    }
-
-    if (waitArg === undefined && targetParts.length === 0 && Number.isFinite(numberArg)) {
-        waitArg = numberArg;
-        continue;
-    }
-
-    targetParts.push(arg);
+function parseFixedNumber(value) {
+    return Number(String(value || "").replace(",", "."));
 }
+
+function sameFixedNumber(a, b) {
+    return Math.abs(Number(a) - Number(b)) < 0.000001;
+}
+
+function parseCaptureArgs(args) {
+    if (commandIsRemove) {
+        return { requestedMode: "auto", waitArg: undefined, targetParts: args.slice() };
+    }
+
+    let requestedMode = "auto";
+    let waitArg;
+    const targetParts = [];
+    let atGroupStart = true;
+
+    for (const arg of args) {
+        const token = String(arg || "").trim();
+        const lowerArg = token.toLowerCase();
+        const numberArg = parseFixedNumber(token);
+
+        if (lowerArg === "--and") {
+            targetParts.push(arg);
+            atGroupStart = true;
+            continue;
+        }
+
+        if (lowerArg === "--not") {
+            targetParts.push(arg);
+            atGroupStart = false;
+            continue;
+        }
+
+        if (atGroupStart && modeNames.has(lowerArg)) {
+            if (!targetParts.length && requestedMode === "auto") {
+                requestedMode = lowerArg;
+                continue;
+            }
+
+            if (requestedMode !== "auto" && lowerArg === requestedMode) continue;
+
+            fail("Capture format is a global setting.", [
+                "Put it once before the filters, or repeat the same value after --and.",
+                "Different capture formats per filter group are not supported.",
+                "Example: jp-capture msk 3 EN/V1 --and msk 3 FR/V2"
+            ]);
+        }
+
+        if (atGroupStart && Number.isFinite(numberArg)) {
+            if (!targetParts.length && waitArg === undefined) {
+                waitArg = numberArg;
+                continue;
+            }
+
+            if (waitArg !== undefined && sameFixedNumber(waitArg, numberArg)) continue;
+
+            fail("Capture wait time is a global setting.", [
+                "Put it once before the filters, or repeat the same value after --and.",
+                "Different wait times per filter group are not supported.",
+                "Example: jp-capture msk 3 EN/V1 --and msk 3 FR/V2"
+            ]);
+        }
+
+        targetParts.push(arg);
+        atGroupStart = false;
+    }
+
+    return { requestedMode, waitArg, targetParts };
+}
+
+const parsedArgs = parseCaptureArgs(captureArgs);
+const requestedMode = parsedArgs.requestedMode;
+const waitArg = parsedArgs.waitArg;
+const targetParts = parsedArgs.targetParts;
 
 const targetFilter = targetParts.join(" ").trim();
 const targetFilters = splitCaptureFilters(targetParts);

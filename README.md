@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.1.0`
+**Versao atual:** `1.0`
 
 Ferramentas de terminal para acelerar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK/MSK.
 

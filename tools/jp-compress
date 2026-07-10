@@ -3,8 +3,11 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { resolveProjectContext } = require("./jp-project-roots");
 
-const root = process.cwd();
+const projectContext = resolveProjectContext(process.cwd());
+const root = projectContext.root;
+const searchRoots = projectContext.searchRoots;
 const commandName = path.basename(process.argv[1] || "");
 const ORIGINAL_DIR_NAME = ".jp-compress-original";
 const LEGACY_ORIGINAL_DIR_NAME = ".jp-compress-backup";
@@ -394,8 +397,33 @@ function walkFiles(dir, results = []) {
     return results;
 }
 
+let knownDirsCache;
+let knownPathsCache;
+
+function allKnownDirs() {
+    if (knownDirsCache) return knownDirsCache;
+
+    const dirs = [];
+
+    searchRoots.forEach((searchRoot) => {
+        dirs.push(searchRoot, ...walkDirs(searchRoot));
+    });
+
+    knownDirsCache = Array.from(new Set(dirs));
+    return knownDirsCache;
+}
+
 function allKnownPaths() {
-    return [root, ...walkDirs(root), ...walkFiles(root)];
+    if (knownPathsCache) return knownPathsCache;
+
+    const paths = allKnownDirs().slice();
+
+    searchRoots.forEach((searchRoot) => {
+        paths.push(...walkFiles(searchRoot));
+    });
+
+    knownPathsCache = Array.from(new Set(paths));
+    return knownPathsCache;
 }
 
 function normalizeFilterPath(value) {
@@ -438,7 +466,7 @@ function scopeHasMatches(scope) {
 
     if (pathExistsCaseSensitive(targetPath)) return fs.statSync(targetPath).isDirectory();
 
-    return [root, ...walkDirs(root)].some((itemPath) => path.relative(root, itemPath).includes(normalizedScope));
+    return allKnownDirs().some((itemPath) => path.relative(root, itemPath).includes(normalizedScope));
 }
 
 function looseScopeHasMatches(scope) {
@@ -733,7 +761,7 @@ function qualitySummaryLabel() {
 }
 
 function collectAssetsDirs() {
-    const candidates = [root, ...walkDirs(root)]
+    const candidates = searchRoots.flatMap((searchRoot) => [searchRoot, ...walkDirs(searchRoot)])
         .filter(isAssetsDir)
         .sort();
 
@@ -916,7 +944,7 @@ function formatBytes(bytes) {
 }
 
 function collectCompressBackupDirs() {
-    const candidates = [root, ...walkDirs(root)]
+    const candidates = searchRoots.flatMap((searchRoot) => [searchRoot, ...walkDirs(searchRoot)])
         .filter(isCompressBackupDir)
         .filter((backupDir) => {
             if (!filterGroups.length) return true;

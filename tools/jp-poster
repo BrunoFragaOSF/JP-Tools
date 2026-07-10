@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const { execSync, spawnSync } = require("child_process");
+const { resolveProjectContext } = require("./jp-project-roots");
 
 function loadPlaywright() {
     try {
@@ -21,7 +22,9 @@ function loadPlaywright() {
 }
 
 const chromium = loadPlaywright();
-const root = process.cwd();
+const projectContext = resolveProjectContext(process.cwd());
+const root = projectContext.root;
+const searchRoots = projectContext.searchRoots;
 const commandName = path.basename(process.argv[1] || "");
 const originalArgs = process.argv.slice(2);
 const commandIsRemove = commandName === "jp-poster-remove";
@@ -55,14 +58,17 @@ const presetSizes = {
 };
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
-    console.log("Usage: jp-poster [16x9|9x16|1x1|WxH] [seconds] [folderFilter]");
+    console.log("Usage: jp-poster [16x9|9x16|1x1|WxH] [seconds] [folderFilter|htmlFilter]");
     console.log("       jp-poster-remove [folderFilter]");
-    console.log("Examples: jp-poster 16x9 2 | jp-poster 9x16 5 EN/V1 --and 2 NL/V2 --not DE/Simulated_DSK | jp-poster 300x600 1");
+    console.log("Examples: jp-poster 16x9 2 | jp-poster 25 left.html --and 10 right.html | jp-poster 10 main.html");
     console.log("          jp-poster-remove | jp-poster-remove FR/Product_Test --and NL/V2 | jp-poster-remove FR/Product_Test --not DE/Simulated_DSK");
     console.log("Default size: 16x9. Default time: 1s.");
     console.log("Finds local videos and video URLs referenced in index/banner HTML, JS or JSON.");
     console.log("Output: banner/assets/poster.jpg, poster2.jpg, poster3.jpg... for each unique video source.");
-    console.log("Advanced filters: use / for folder levels, --and/--AND for multiple folders, and --not to exclude. Filters are case-sensitive.");
+    console.log("Advanced filters: use an exact HTML filename/path or / for folder levels; combine groups with --and and exclude with --not. Filters are case-sensitive.");
+    console.log("HTML basename: expanded_video.html matches every exact file with that name across the detected project scope.");
+    console.log("HTML path: DSK/F1/banner/expanded_video.html limits the poster to that specific panel.");
+    console.log("HTML filters require a direct video reference in that HTML; files without video are reported and ignored.");
     console.log("Settings: size/time before the first filter become defaults. After --and, they apply only to that group, like jp-poster 5 V1 --and 2 V2.");
     console.log("Advanced override: JP_POSTER_QUALITY=90 JP_POSTER_FIT=cover");
     process.exit(0);
@@ -217,7 +223,37 @@ function pickSecondScope(scopes, first) {
     return scopes.find((scope) => scope !== first) || first;
 }
 
+function htmlFilterCandidates() {
+    const htmlPaths = collectFilterCandidates()
+        .filter((itemPath) => /\.html?$/i.test(itemPath))
+        .filter((itemPath) => extractVideoReferences(itemPath).length)
+        .sort();
+    const counts = new Map();
+
+    htmlPaths.forEach((itemPath) => {
+        const name = path.basename(itemPath);
+        counts.set(name, (counts.get(name) || 0) + 1);
+    });
+
+    return htmlPaths.map((itemPath) => {
+        const name = path.basename(itemPath);
+        return counts.get(name) === 1 ? name : path.relative(root, itemPath);
+    });
+}
+
 function posterExample(kind) {
+    const htmlFilters = htmlFilterCandidates();
+    const firstHtml = htmlFilters[0];
+    const secondHtml = htmlFilters.find((filter) => filter !== firstHtml);
+
+    if (firstHtml && secondHtml) {
+        return kind === "exclude"
+            ? "jp-poster 5 " + firstHtml + " --not " + secondHtml
+            : "jp-poster 5 " + firstHtml + " --and 2 " + secondHtml;
+    }
+
+    if (firstHtml) return "jp-poster 5 " + firstHtml;
+
     const scopes = scopeCandidatesFromKnownPaths();
     const first = scopes[0] || "EN/V1";
     const second = pickSecondScope(scopes, first) || "FR/Product_Test";
@@ -446,7 +482,13 @@ function pathExistsCaseSensitive(targetPath) {
 }
 
 function collectFilterCandidates() {
-    return Array.from(new Set([root, ...walkDirs(root), ...walkFiles(root, () => true)])).sort();
+    const candidates = [];
+
+    searchRoots.forEach((searchRoot) => {
+        candidates.push(searchRoot, ...walkDirs(searchRoot), ...walkFiles(searchRoot, () => true));
+    });
+
+    return Array.from(new Set(candidates)).sort();
 }
 
 function relativeCandidatesForPaths(paths) {
@@ -482,16 +524,18 @@ function findSimilarPathFilter(filter, candidates) {
 
 function describeMissingPathFilter(filter, candidates) {
     const similar = findSimilarPathFilter(filter, candidates);
+    const isHtml = /\.html?$/i.test(cleanFilter(filter));
+    const filterType = isHtml ? "HTML" : "Folder/version";
 
     if (similar && similar.reason === "slash") {
-        return "Folder/version filter not found: " + filter + ". Did you mean " + similar.value + "? Use / for folder levels.";
+        return filterType + " filter not found: " + filter + ". Did you mean " + similar.value + "? Use / for folder levels.";
     }
 
     if (similar && similar.reason === "case") {
-        return "Folder/version filter not found: " + filter + ". Found similar path with different uppercase/lowercase: " + similar.value + ". Filters are case-sensitive.";
+        return filterType + " filter not found: " + filter + ". Found similar path with different uppercase/lowercase: " + similar.value + ". Filters are case-sensitive.";
     }
 
-    return "Folder/version filter not found: " + filter + ". Filters are case-sensitive and must use / for levels, like EN/V2.";
+    return filterType + " filter not found: " + filter + ". Use an exact HTML filename/path or / for folder levels, and match uppercase/lowercase.";
 }
 
 function validatePathFilters(filters) {
@@ -509,9 +553,9 @@ function validatePathFilters(filters) {
 
     if (!missing.length) return;
 
-    fail("Invalid folder/version filter.", [
+    fail("Invalid folder/version/HTML filter.", [
         ...Array.from(new Set(missing)),
-        "Use the exact uppercase/lowercase from the folder name.",
+        "Use the exact uppercase/lowercase from the folder or HTML filename.",
         "Example: " + posterExample("exclude")
     ]);
 }
@@ -520,6 +564,15 @@ function matchPathFilter(filePath, filter) {
     if (!filter) return true;
 
     const normalizedTarget = normalizeFilterPath(filter);
+    const isHtml = /\.html?$/i.test(normalizedTarget);
+
+    if (isHtml) {
+        const relativePath = path.relative(root, filePath);
+        return normalizedTarget.includes(path.sep)
+            ? relativePath === normalizedTarget || relativePath.endsWith(path.sep + normalizedTarget)
+            : path.basename(filePath) === normalizedTarget;
+    }
+
     const targetPath = path.resolve(root, normalizedTarget);
 
     if (pathExistsCaseSensitive(targetPath)) {
@@ -546,6 +599,11 @@ function matchesTarget(filePath) {
     return included && !excluded;
 }
 
+function hasHtmlFilter() {
+    return [...targetFilters.includes, ...targetFilters.excludes]
+        .some((filter) => /\.html?$/i.test(cleanFilter(filter)));
+}
+
 function collectLocalVideos(searchRoot) {
     return walkFiles(searchRoot, (filePath) => videoExts.has(path.extname(filePath).toLowerCase()))
         .filter(matchesTarget)
@@ -561,6 +619,31 @@ function collectLocalVideos(searchRoot) {
 function collectReferenceFiles(searchRoot) {
     return walkFiles(searchRoot, (filePath) => referenceExts.has(path.extname(filePath).toLowerCase()))
         .filter(matchesTarget);
+}
+
+function reportHtmlFilterMatches() {
+    const htmlFilters = targetFilters.includes.filter((filter) => /\.html?$/i.test(cleanFilter(filter)));
+    if (!htmlFilters.length) return;
+
+    const htmlFiles = searchRoots.flatMap((searchRoot) => walkFiles(searchRoot, (filePath) => /\.html?$/i.test(filePath)));
+
+    htmlFilters.forEach((filter) => {
+        const matches = htmlFiles.filter((filePath) => matchPathFilter(filePath, filter));
+        const withVideo = matches.filter((filePath) => {
+            return extractVideoReferences(filePath).some((item) => resolveSource(item));
+        });
+
+        if (!withVideo.length) {
+            console.warn(`HTML filter ${filter}: matched ${matches.length} file(s), but none contains a direct video reference. No poster will be created for this group.`);
+            return;
+        }
+
+        const ignoredCount = matches.length - withVideo.length;
+        const ignoredLabel = ignoredCount
+            ? `; ${ignoredCount} without a direct video reference will be ignored`
+            : "";
+        console.log(`HTML filter ${filter}: ${withVideo.length} panel(s) with video${ignoredLabel}.`);
+    });
 }
 
 function extractVideoReferences(filePath) {
@@ -650,7 +733,8 @@ function dedupeSources(sources) {
         const resolvedSource = resolveSource(item);
         if (!resolvedSource) continue;
 
-        const key = `${resolvedSource.url || resolvedSource.filePath}|${item.outputDir}`;
+        const settings = posterSettingsLabel(posterConfigForItem(item));
+        const key = `${resolvedSource.url || resolvedSource.filePath}|${item.outputDir}|${settings}`;
         if (seen.has(key)) continue;
 
         seen.add(key);
@@ -781,14 +865,18 @@ function posterSettingsLabel(config) {
     return config.outputSize.width + "x" + config.outputSize.height + " @ " + config.captureSecond + "s";
 }
 
-function posterSummaryLabel() {
-    const groups = posterGroups.length ? posterGroups : [defaultPosterConfig];
-    const labels = Array.from(new Set(groups.map(posterSettingsLabel)));
+function posterSummaryLabel(items) {
+    const configs = items && items.length
+        ? items.map(posterConfigForItem)
+        : posterGroups.length
+            ? posterGroups
+            : [defaultPosterConfig];
+    const labels = Array.from(new Set(configs.map(posterSettingsLabel)));
     return labels.length === 1 ? labels[0] : labels.join(", ");
 }
 
 function removePosters() {
-    const posterFiles = collectPosterFiles(root);
+    const posterFiles = searchRoots.flatMap(collectPosterFiles);
 
     if (!posterFiles.length) {
         console.log(targetFilter ? `No poster files found for: ${targetFilter}` : "No poster files found.");
@@ -952,20 +1040,26 @@ async function main() {
         return;
     }
 
-    const localSources = collectLocalVideos(root);
-    const referencedSources = collectReferenceFiles(root).flatMap(extractVideoReferences);
+    reportHtmlFilterMatches();
+
+    const localSources = hasHtmlFilter()
+        ? []
+        : searchRoots.flatMap(collectLocalVideos);
+    const referencedSources = searchRoots.flatMap(collectReferenceFiles).flatMap(extractVideoReferences);
     const sources = dedupeSources([...localSources, ...referencedSources]);
 
     if (!sources.length) {
-        console.error(targetFilter ? `No videos or video references found for: ${targetFilter}` : "No videos or video references found in this folder.");
-        if (targetFilter) console.error("Tip: use / for folder levels, like EN/V1, and match uppercase/lowercase exactly. Combine groups with --and, like EN/V1 --and FR/Product_Test.");
+        console.error(targetFilter ? `No videos or video references found for: ${targetFilter}` : "No videos or video references found in the detected project folders.");
+        if (targetFilter) console.error("Tip: use an exact HTML filename/path or / for folder levels, and match uppercase/lowercase exactly.");
         process.exit(1);
     }
 
-    console.log(`jp-poster: ${sources.length} video source(s) | ${posterSummaryLabel()} | ${objectFit}`);
+    console.log(`jp-poster: ${sources.length} video source(s) | ${posterSummaryLabel(sources)} | ${objectFit}`);
 
     const useFfmpeg = hasFfmpeg();
-    const { server, origin } = await startStaticServer();
+    const staticServer = useFfmpeg ? null : await startStaticServer();
+    const server = staticServer && staticServer.server;
+    const origin = staticServer ? staticServer.origin : "";
     const browser = useFfmpeg ? null : await chromium.launch({ headless: true });
 
     try {
@@ -981,11 +1075,11 @@ async function main() {
                 await capturePoster(browser, item, outputPath, origin, posterConfig);
             }
 
-            console.log(`created ${path.relative(root, outputPath)} (${posterSettingsLabel(posterConfig)})`);
+            console.log(`created ${path.relative(root, outputPath)} (${posterSettingsLabel(posterConfig)}, from ${path.relative(root, item.sourceFile)})`);
         }
     } finally {
         if (browser) await browser.close();
-        server.close();
+        if (server) server.close();
     }
 }
 

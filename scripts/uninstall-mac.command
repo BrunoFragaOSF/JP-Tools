@@ -11,6 +11,7 @@ COMMANDS=(
     jp-compress-original
     jp-compress-original-remove
     jp-help
+    jp-project-roots.js
 )
 
 for cmd in "${COMMANDS[@]}"; do

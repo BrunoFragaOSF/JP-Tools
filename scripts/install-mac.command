@@ -18,6 +18,7 @@ copy_tool jp-capture
 copy_tool jp-poster
 copy_tool jp-compress
 copy_tool jp-help
+copy_tool jp-project-roots.js
 
 ln -sf "$BIN_DIR/jp-capture" "$BIN_DIR/jp-capture-remove"
 ln -sf "$BIN_DIR/jp-poster" "$BIN_DIR/jp-poster-remove"

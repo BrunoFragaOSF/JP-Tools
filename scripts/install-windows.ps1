@@ -55,6 +55,7 @@ Copy-Tool "jp-capture"
 Copy-Tool "jp-poster"
 Copy-Tool "jp-compress"
 Copy-Tool "jp-help"
+Copy-Item -Force (Join-Path $ToolsDir "jp-project-roots.js") (Join-Path $ToolInstallDir "jp-project-roots.js")
 
 Write-Cmd "jp-capture" "jp-capture"
 Write-Cmd "jp-capture-remove" "jp-capture"

@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const { execSync } = require("child_process");
+const { resolveProjectContext } = require("./jp-project-roots");
 
 function loadPlaywright() {
     try {
@@ -26,7 +27,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
     console.log("Usage: jp-capture [msk|dsk] [waitSeconds] [folderFilter]");
         console.log("Examples: jp-capture msk 3 EN/V1 | jp-capture dsk 10 dsk_spider-v1 | jp-capture msk 3 EN/V1 --and msk 3 FR/Product_Test");
         console.log("          jp-capture-remove | jp-capture-remove FR/Product_Test --and NL/V2");
-    console.log("Default: auto-detects DSK from the current path, otherwise MSK.");
+    console.log("Default: auto-detects DSK/MSK for each project, including folders in a VS Code multi-root workspace.");
     console.log("Default wait: 3s. folderFilter must use / for folder levels, like EN/V1, and is case-sensitive.");
     console.log("Advanced filters: use --and/--AND for multiple folders, and --not to exclude. Example: EN/V1 --and FR/Product_Test --not DE/Simulated_DSK");
     console.log("Global settings: format/wait apply to all filters. You may repeat the same value after --and, like jp-capture msk 3 EN/V1 --and msk 3 FR/V2.");
@@ -35,7 +36,9 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
     process.exit(0);
 }
 
-const root = process.cwd();
+const projectContext = resolveProjectContext(process.cwd());
+const root = projectContext.root;
+const searchRoots = projectContext.searchRoots;
 const commandName = path.basename(process.argv[1] || "");
 const sizes = {
     msk: { width: 300, height: 600 },
@@ -144,17 +147,12 @@ const targetParts = parsedArgs.targetParts;
 
 const targetFilter = targetParts.join(" ").trim();
 const targetFilters = splitCaptureFilters(targetParts);
-const mode = requestedMode === "auto"
-    ? (/([\\/]|^)dsk([\\/]|$)/i.test(root) ? "dsk" : "msk")
-    : requestedMode;
 const waitMs = Number(process.env.JP_CAPTURE_WAIT || ((Number.isFinite(waitArg) ? waitArg : 3) * 1000));
 const quality = Number(process.env.JP_CAPTURE_QUALITY || 90);
-const viewport = sizes[mode];
 const mskTopBarHeight = Number(process.env.JP_MSK_TOP_BAR || 28);
 const mskBottomBarHeight = Number(process.env.JP_MSK_BOTTOM_BAR || 32);
-const isMskMode = mode === "msk" || mode === "mobile";
 
-if (!viewport) {
+if (requestedMode !== "auto" && !sizes[requestedMode]) {
     console.error("Usage: jp-capture [msk|dsk] [waitSeconds] [folderFilter]");
     process.exit(1);
 }
@@ -189,20 +187,29 @@ function pickSecondScope(scopes, first) {
     return scopes.find((scope) => scope !== first) || first;
 }
 
+function captureModeForScope(scope) {
+    const parts = String(scope || "").split(/[\\/]/).map((part) => part.toLowerCase());
+    return parts.includes("dsk") || parts.includes("desktop") ? "dsk" : "msk";
+}
+
 function captureExample(kind) {
-    const scopes = scopeCandidatesFromIndexFiles(findIndexFiles(root).sort());
+    const scopes = scopeCandidatesFromIndexFiles(searchRoots.flatMap((searchRoot) => findIndexFiles(searchRoot)).sort());
     const first = scopes[0] || "EN/V1";
     const second = pickSecondScope(scopes, first) || "FR/Product_Test";
+    const firstMode = captureModeForScope(first);
+    const secondMode = captureModeForScope(second);
 
     if (kind === "exclude" && second && second !== first) {
-        return "jp-capture msk 3 " + first + " --not " + second;
+        return "jp-capture " + firstMode + " 3 " + first + " --not " + second;
     }
 
     if (kind === "and" && second && second !== first) {
-        return "jp-capture msk 3 " + first + " --and " + second;
+        return firstMode === secondMode
+            ? "jp-capture " + firstMode + " 3 " + first + " --and " + second
+            : "jp-capture 3 " + first + " --and " + second;
     }
 
-    return "jp-capture msk 3 " + first;
+    return "jp-capture " + firstMode + " 3 " + first;
 }
 
 function cleanFilter(value) {
@@ -634,6 +641,22 @@ function hasMskMain(indexPath) {
     return fs.existsSync(path.join(path.dirname(indexPath), "banner", "main.html"));
 }
 
+function captureModeForIndex(indexPath) {
+    if (requestedMode !== "auto") {
+        return requestedMode === "desktop" ? "dsk" : requestedMode === "mobile" ? "msk" : requestedMode;
+    }
+
+    const relativeParts = path.relative(root, indexPath).split(path.sep).map((part) => part.toLowerCase());
+
+    if (relativeParts.includes("dsk") || relativeParts.includes("desktop")) return "dsk";
+    if (relativeParts.includes("msk") || relativeParts.includes("mobile")) return "msk";
+
+    if (hasMskMain(indexPath)) return "msk";
+    if (/([\\/]|^)dsk([\\/]|$)/i.test(projectContext.invocationRoot)) return "dsk";
+    if (/([\\/]|^)msk([\\/]|$)/i.test(projectContext.invocationRoot)) return "msk";
+    return "dsk";
+}
+
 async function installMskCaptureEnvironment(page) {
     await page.addInitScript(() => {
         function patchPremiumVisibility() {
@@ -762,14 +785,12 @@ body {
 }
 
 (async () => {
-    const allIndexFiles = findIndexFiles(root).sort();
+    const allIndexFiles = Array.from(new Set(searchRoots.flatMap((searchRoot) => findIndexFiles(searchRoot)))).sort();
     validatePathFilters(targetFilters, allIndexFiles);
     const filteredIndexFiles = filterIndexFiles(allIndexFiles);
     const indexFiles = shouldRemove
         ? filteredIndexFiles
-        : isMskMode
-            ? filteredIndexFiles.filter(hasMskMain)
-            : filteredIndexFiles;
+        : filteredIndexFiles.filter((indexPath) => captureModeForIndex(indexPath) !== "msk" || hasMskMain(indexPath));
 
     if (!indexFiles.length) {
         if (targetFilter) {
@@ -780,7 +801,7 @@ body {
             ]);
         }
 
-        console.log("No index.html files found from:", root);
+        console.log("No index.html files found in the detected project folders.");
         process.exit(0);
     }
 
@@ -807,21 +828,25 @@ body {
 
     const { server, origin } = await startStaticServer();
     const browser = await chromium.launch();
-    const page = await browser.newPage({
-        viewport,
-        deviceScaleFactor: 1
-    });
-
-    if (isMskMode) {
-        await installMskCaptureEnvironment(page);
-    }
 
     for (const indexPath of indexFiles) {
+        const itemMode = captureModeForIndex(indexPath);
+        const viewport = sizes[itemMode];
+        const isMskMode = itemMode === "msk";
+        const page = await browser.newPage({
+            viewport,
+            deviceScaleFactor: 1
+        });
+
+        if (isMskMode) {
+            await installMskCaptureEnvironment(page);
+        }
+
         const relativeIndex = path.relative(root, indexPath);
         const bannerDir = path.join(path.dirname(indexPath), "banner");
         const outputPath = path.join(bannerDir, "backup.jpg");
 
-        console.log(`Capturing ${relativeIndex} -> ${path.relative(root, outputPath)}`);
+        console.log(`Capturing ${relativeIndex} [${itemMode.toUpperCase()}] -> ${path.relative(root, outputPath)}`);
 
         const relativeMain = path.relative(root, path.join(path.dirname(indexPath), "banner", "main.html"));
         const urlPath = relativeIndex.split(path.sep).map(encodeURIComponent).join("/");
@@ -849,6 +874,8 @@ body {
             quality,
             fullPage: false
         });
+
+        await page.close();
     }
 
     await browser.close();

@@ -1,23 +1,26 @@
 # JP Tools
 
-**Versao atual:** `1.1.0`
+**Versao atual:** `1.2.0`
 
-Ferramentas de terminal para acelerar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK/MSK.
+Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK e MSK.
 
-Este repositorio e publico para facilitar a instalacao e permitir que qualquer pessoa confira o codigo antes de usar. Os scripts ficam abertos nas pastas `tools/` e `scripts/`, entao o time pode revisar o funcionamento sempre que quiser.
+O projeto e publico para que qualquer pessoa possa ler os scripts antes de instalar. Nao existe servidor proprio, telemetria ou envio dos arquivos do banner para o JP Tools.
 
-## Download
+## Para Que Serve
 
-Baixe a pasta compactada pela aba **Releases** do GitHub.
+O JP Tools cobre o fluxo mais comum de preparacao e entrega de banners:
 
-1. Abra a release mais recente.
-2. Baixe o arquivo compactado do JP Tools.
-3. Descompacte a pasta.
-4. Rode o instalador do seu sistema.
+- gera `banner/backup.jpg` das versoes;
+- gera posters a partir dos videos usados nos paineis;
+- comprime imagens e preserva os arquivos originais;
+- remove capturas e posters antigos;
+- restaura imagens anteriores a compressao;
+- valida filtros e explica erros antes de alterar arquivos;
+- reconhece projetos abertos como workspace multi-root no VS Code.
 
-## Uso Mais Comum
+## Uso Mais Simples
 
-Na maior parte do tempo voce provavelmente so vai usar estes tres comandos:
+Na maior parte do trabalho, use apenas estes tres comandos:
 
 ```bash
 jp-capture
@@ -25,42 +28,42 @@ jp-poster
 jp-compress
 ```
 
-Eles cobrem o fluxo principal:
+### `jp-capture`
 
-- `jp-capture`: gera `banner/backup.jpg` das versoes.
-- `jp-poster`: gera posters de videos em `banner/assets`.
-- `jp-compress`: comprime imagens e salva backup dos originais.
+Sem argumentos, encontra todas as versoes no escopo atual e gera `banner/backup.jpg`.
 
-Novidade da versao `1.1.0`: no `jp-poster` e no `jp-compress`, ajustes depois de `--and` podem mudar apenas aquele grupo. Assim da para capturar posters em segundos diferentes ou comprimir grupos com qualidades diferentes no mesmo comando.
+- DSK: captura em `1920x1200`.
+- MSK: captura em `300x600`, incluindo as barras do preview.
+- Espera padrao: `3` segundos.
+- Em um workspace com DSK e MSK, detecta o formato de cada `index.html` separadamente.
 
-O JP Tools deve ser usado dentro da pasta do projeto, DSK, MSK, idioma ou versao. Sem filtro, ele varre tudo abaixo da pasta atual. Com filtro, ele processa apenas as pastas/versoes indicadas.
+### `jp-poster`
 
-Exemplo de estrutura comum:
+Sem argumentos, encontra os videos locais e as referencias de video do projeto e gera `poster.jpg`, `poster2.jpg` etc. dentro de `banner/assets`.
 
-```text
-Projeto/
-  EN/V1/index.html
-  EN/V1/banner/assets/
-  EN/V2/index.html
-  EN/V2/banner/assets/
-  FR/Product_Test/index.html
-```
+- Formato padrao: `16x9`.
+- Tempo padrao: segundo `1`.
+- Cada fonte de video unica recebe seu poster no diretorio correto.
 
-Exemplos de uso:
+### `jp-compress`
 
-```bash
-jp-capture msk 3 EN/V1
-jp-poster 16x9 5 EN/V1 --and 2 EN/V2
-jp-compress 80 EN/V1 CTA.png --and 70 EN/V2 CTA.png
-```
+Sem argumentos, comprime imagens em `banner/assets` e tambem `banner/backup.jpg`.
 
-Os comandos foram feitos para falhar quando algo parece errado. Se um filtro de pasta, versao ou imagem nao existir, ou se o nome estiver com maiuscula/minuscula diferente, o erro tenta explicar o problema e sugerir um exemplo usando pastas reais do projeto.
+- Qualidade padrao: `80`.
+- So substitui uma imagem quando o resultado comprimido fica menor.
+- Salva o original em `.jp-compress-original` antes de substituir.
 
-Os outros comandos sao complementos avancados para remover capturas/posters, restaurar imagens originais ou limpar backups.
+Os comandos sem filtro sao globais dentro do escopo detectado. Isso significa que eles processam todas as versoes validas abaixo da pasta atual ou todas as raizes de projeto detectadas no workspace.
 
-## Instalacao
+## Instalacao Completa
 
-Depois de baixar a pasta compactada pela **Release**, descompacte e use apenas um dos arquivos abaixo.
+### Download
+
+1. Abra a aba **Releases** deste repositorio.
+2. Entre na release mais recente.
+3. Baixe `JP-Tools-v1.2.0.zip`.
+4. Descompacte a pasta.
+5. Rode o instalador do seu sistema.
 
 ### Mac
 
@@ -70,7 +73,7 @@ Clique duas vezes em:
 INSTALL-MAC.command
 ```
 
-Se o macOS bloquear por seguranca, abra o Terminal dentro da pasta do JP Tools e rode:
+Se o macOS bloquear o arquivo, abra o Terminal dentro da pasta descompactada e rode:
 
 ```bash
 xattr -dr com.apple.quarantine .
@@ -86,41 +89,23 @@ Clique duas vezes em:
 INSTALL-WINDOWS.bat
 ```
 
-Se Node acabou de ser instalado e ainda nao entrou no `PATH`, abra um novo terminal e rode o instalador novamente.
+Se Node acabou de ser instalado e ainda nao apareceu no `PATH`, abra um novo terminal e rode o instalador novamente.
 
-## O Que Cada Pasta Faz
+### Teste Depois De Instalar
 
-```text
-INSTALL-MAC.command          instalador amigavel para Mac
-INSTALL-WINDOWS.bat          instalador amigavel para Windows
-UNINSTALL-MAC.command        desinstalador amigavel para Mac
-UNINSTALL-WINDOWS.bat        desinstalador amigavel para Windows
-scripts/                     scripts internos chamados pelos instaladores
-tools/                       comandos JP Tools instalados no computador
-```
-
-A pasta `scripts/` e necessaria. Os arquivos da raiz sao os atalhos que a pessoa clica; eles chamam os scripts internos para fazer a instalacao/desinstalacao de verdade.
-
-A pasta `tools/` contem os comandos principais:
-
-```text
-tools/jp-capture
-tools/jp-poster
-tools/jp-compress
-tools/jp-help
-```
-
-## Teste Apos Instalar
-
-Abra um terminal novo e rode:
+Abra um terminal novo dentro de um projeto e rode:
 
 ```bash
 jp-help
 ```
 
-O `jp-help` mostra os comandos disponiveis e tenta detectar pastas, versoes e imagens da pasta atual para montar exemplos reais do projeto.
+O help detecta pastas, versoes, HTMLs de video e imagens reais do projeto para montar exemplos apropriados ao trabalho atual.
 
-## Desinstalacao
+### Atualizacao
+
+Baixe a release nova e rode novamente o mesmo instalador. Ele substitui os comandos antigos pelos novos.
+
+### Desinstalacao
 
 Use um destes arquivos:
 
@@ -129,126 +114,185 @@ UNINSTALL-MAC.command
 UNINSTALL-WINDOWS.bat
 ```
 
-O desinstalador remove os comandos do JP Tools e pergunta antes de remover dependencias como Node, FFmpeg, ImageMagick, Playwright e Chromium, porque elas podem ser usadas por outros projetos.
+O desinstalador remove o JP Tools e pergunta antes de remover dependencias compartilhadas como Node, FFmpeg, ImageMagick, Playwright e Chromium.
 
-## Dependencias
+## Onde Os Comandos Atuam
 
-O instalador tenta instalar ou configurar:
+Rode o JP Tools dentro da pasta geral do projeto, DSK, MSK, idioma ou versao.
 
-- Node.js
-- Playwright
-- Chromium
-- FFmpeg
-- ImageMagick
-- Otimizadores de imagem quando disponiveis, como `jpegoptim`, `pngquant`, `oxipng` e `webp`
-
-No Windows, algumas otimizacoes podem depender do que estiver disponivel no sistema. O `jp-compress` usa ImageMagick/FFmpeg como fallback.
-
-## Regras de Filtro
-
-Os filtros sao rigidos para evitar erro silencioso em producao.
-
-- A ordem importa: comando, ajustes, depois filtro.
-- Pastas e versoes usam `/` para niveis: `EN/V1`, nao `EN V1`.
-- Filtros sao case-sensitive: `text-1.png` e diferente de `TEXT-1.png`.
-- `--and` soma grupos.
-- `--not` exclui grupos.
-- No `jp-poster`, proporcao/tempo antes do primeiro filtro viram padrao; depois de `--and`, podem mudar apenas aquele grupo.
-- No `jp-compress`, qualidade antes do primeiro filtro vira padrao; depois de `--and`, pode mudar apenas aquele grupo.
-- No `jp-compress`, imagem precisa ter nome completo, extensao, case exato e existir.
-
-Exemplos:
-
-```bash
-jp-capture msk 3 EN/V1
-jp-capture EN/V1 --and FR/Product_Test --not DE/Simulated_DSK
-jp-poster 16x9 5 EN/V1 --and 2 NL/V2
-jp-compress 80 EN/V1 CTA.png --and 70 NL/V2 chat-2.png
-```
-
-Se voce digitar algo errado, os comandos tentam explicar o motivo e sugerir um exemplo baseado nas pastas reais da pasta atual.
-
-Exemplo de erro esperado:
+Exemplo:
 
 ```text
-JP Tools error: Invalid folder/version filter.
-  - Folder/version filter not found: EN V2. Did you mean EN/V2? Use / for folder levels.
+Projeto/
+  DSK/
+    Baseball/index.html
+    Baseball/banner/assets/
+    F1/index.html
+    F1/banner/assets/
+  MSK/
+    Baseball/index.html
+    Baseball/banner/assets/
+```
+
+Sem filtro, o comando varre tudo abaixo da pasta atual.
+
+Quando `DSK` e `MSK` sao adicionados separadamente ao mesmo workspace multi-root do VS Code, o JP Tools reconhece as duas raizes. O comando pode ser executado no terminal de uma delas e processa as duas sem exigir que a pasta pai esteja aberta no Explorer.
+
+Somente raizes com estrutura valida de projeto, incluindo `index.html` e `banner`, entram na varredura.
+
+## Como Ler Um Comando
+
+A ordem e sempre:
+
+```text
+comando -> ajustes -> filtros
+```
+
+Exemplo:
+
+```bash
+jp-poster 16x9 5 DSK/F1
+```
+
+- `jp-poster`: comando.
+- `16x9`: ajuste de formato.
+- `5`: ajuste de tempo.
+- `DSK/F1`: filtro de pasta/versao.
+
+As regras principais sao:
+
+- pastas e versoes usam `/` para representar niveis: `EN/V1`, nao `EN V1`;
+- filtros sao case-sensitive: `text-1.png` e diferente de `TEXT-1.png`;
+- `--and` adiciona outro grupo;
+- `--not` exclui o filtro seguinte;
+- `--and` e `--not` nunca podem ficar sem um filtro depois deles;
+- imagens devem usar nome completo, extensao e case exato;
+- no `jp-poster` e `jp-compress`, ajustes depois de `--and` valem apenas para aquele grupo.
+
+## Filtro Por HTML No `jp-poster`
+
+O HTML pode ser usado diretamente como filtro, sem informar a pasta da versao.
+
+```bash
+jp-poster 5 expanded_video.html
+```
+
+Esse comando procura todo arquivo chamado exatamente `expanded_video.html` no escopo detectado. Se ele existir em `Baseball`, `F1` e `FIFA`, os tres videos recebem poster no segundo `5`.
+
+Exemplo de resultado:
+
+```text
+HTML filter expanded_video.html: 3 panel(s) with video.
+created DSK/Baseball/banner/assets/poster.jpg (...)
+created DSK/F1/banner/assets/poster.jpg (...)
+created DSK/FIFA/banner/assets/poster.jpg (...)
+```
+
+### Tempos Diferentes Por HTML
+
+```bash
+jp-poster 5 expanded_video.html --and 20 left.html
+```
+
+- todos os `expanded_video.html` usam o segundo `5`;
+- todos os `left.html` usam o segundo `20`;
+- se o segundo grupo nao informar tempo, ele herda o tempo padrao do inicio do comando.
+
+### Somente Uma Versao
+
+Use o caminho completo quando quiser limitar o filtro:
+
+```bash
+jp-poster 5 DSK/F1/banner/expanded_video.html
+```
+
+Assim apenas o painel de F1 recebe o poster.
+
+### HTML Sem Video
+
+O HTML precisa conter uma referencia direta para `.mp4`, `.webm`, `.mov` ou `.m4v`, por exemplo:
+
+```html
+<video src="assets/video.mp4"></video>
+<div jp-createvideo-src="https://video-content.gumgum.com/video.mp4"></div>
+```
+
+Se `top.html` existir mas for apenas visual e nao tiver video, ele nao gera poster. A partir da versao `1.2.0`, o comando informa isso claramente:
+
+```text
+HTML filter top.html: matched 3 file(s), but none contains a direct video reference. No poster will be created for this group.
 ```
 
 ## Comandos
 
-### jp-capture
+### `jp-capture`
 
 Gera `banner/backup.jpg`.
 
 ```bash
 jp-capture
 jp-capture msk 3 EN/V1
-jp-capture dsk 10 EN/V1
-jp-capture EN/V1 --and FR/Product_Test --not DE/Simulated_DSK
+jp-capture dsk 10 DSK/F1
+jp-capture DSK/Baseball --and MSK/Baseball
+jp-capture EN/V1 --not EN/V2
 ```
 
 Parametros:
 
-- `msk` ou `dsk`: forca o tipo de captura.
-- tempo em segundos: espera antes de capturar. Exemplo: `3`, `5`, `10`.
-- filtro: pasta/versao que deve ser processada.
+- `msk` ou `dsk`: forca o formato;
+- numero: espera em segundos antes da captura;
+- filtro: pasta ou versao que deve ser processada.
 
-Sem `msk` ou `dsk`, o comando tenta detectar pelo caminho atual.
-
-Variaveis uteis:
+Variaveis avancadas:
 
 ```bash
 JP_CAPTURE_WAIT=5000 jp-capture msk
 JP_CAPTURE_QUALITY=90 jp-capture dsk
 ```
 
-### jp-capture-remove
+### `jp-capture-remove`
 
-Remove `banner/backup.jpg` das versoes filtradas.
+Remove `banner/backup.jpg`.
 
 ```bash
 jp-capture-remove
 jp-capture-remove EN/V1
-jp-capture-remove EN/V1 --and FR/Product_Test
+jp-capture-remove EN/V1 --and FR/V2
 ```
 
-### jp-poster
+### `jp-poster`
 
-Gera `poster.jpg`, `poster2.jpg`, `poster3.jpg` etc. em `banner/assets`, buscando videos locais ou referencias em HTML/JS/JSON.
+Gera posters para videos locais ou referencias encontradas em HTML, JS e JSON.
 
 ```bash
 jp-poster
 jp-poster 16x9 2 EN/V1
+jp-poster 5 expanded_video.html
+jp-poster 5 expanded_video.html --and 20 left.html
+jp-poster 5 DSK/F1/banner/expanded_video.html
 jp-poster 9x16 5 EN/V1 --and 2 NL/V2
-jp-poster 300x600 1 FR/Product_Test
 ```
-
-Ajustes por grupo:
-
-- `jp-poster 5 EN/V1 --and 2 NL/V2` captura `EN/V1` no segundo `5` e `NL/V2` no segundo `2`.
-- `jp-poster 5 EN/V1 --and NL/V2` usa `5` segundos nos dois grupos.
-- A proporcao tambem pode mudar por grupo quando for informada depois de `--and`.
 
 Formatos aceitos:
 
 - `16x9`
 - `9x16`
 - `1x1`
+- `square`
 - `msk`
 - `dsk`
-- `WxH`, por exemplo `300x600`
+- `WxH`, como `300x600`
 
-Variaveis uteis:
+Variaveis avancadas:
 
 ```bash
 JP_POSTER_QUALITY=90 jp-poster 16x9 2
 JP_POSTER_FIT=contain jp-poster 9x16 2
 ```
 
-### jp-poster-remove
+### `jp-poster-remove`
 
-Remove posters gerados dentro de `banner/assets`.
+Remove `poster.jpg`, `poster2.jpg` etc. dentro de `banner/assets`.
 
 ```bash
 jp-poster-remove
@@ -256,11 +300,9 @@ jp-poster-remove EN/V1
 jp-poster-remove EN/V1 --and NL/V2
 ```
 
-### jp-compress
+### `jp-compress`
 
-Comprime imagens em `banner/assets` e tambem `banner/backup.jpg`.
-
-Antes de substituir qualquer imagem, salva o original em `.jp-compress-original` ao lado de `index.html`/`banner`.
+Comprime imagens e salva os originais antes de substituir.
 
 ```bash
 jp-compress
@@ -276,73 +318,101 @@ Qualidade:
 - minimo: `0`
 - maximo: `100`
 
-Ajustes por grupo:
+### `jp-compress-original`
 
-- `jp-compress 80 EN/V1 --and 70 NL/V2` usa qualidade `80` em `EN/V1` e `70` em `NL/V2`.
-- `jp-compress 80 EN/V1 --and NL/V2` usa qualidade `80` nos dois grupos.
-
-O comando so substitui a imagem se o resultado comprimido for menor.
-
-### jp-compress-original
-
-Restaura imagens originais salvas antes do `jp-compress`.
+Restaura imagens salvas em `.jp-compress-original`. O backup restaurado e removido depois da restauracao.
 
 ```bash
 jp-compress-original
 jp-compress-original EN/V1
 jp-compress-original EN/V1 --not CTA.png
-jp-compress-original FR/Product_Test --not Logo.png, Cta.png --and NL/V2 --not Headline.png
+jp-compress-original FR/V1 --not Logo.png --and NL/V2 --not Headline.png
 ```
 
-Depois de restaurar uma imagem, o backup restaurado e removido. Pastas vazias sao limpas.
+### `jp-compress-original-remove`
 
-### jp-compress-original-remove
-
-Remove pastas `.jp-compress-original` quando voce terminou e nao precisa mais restaurar imagens.
+Remove pastas `.jp-compress-original` que nao serao mais usadas.
 
 ```bash
 jp-compress-original-remove
 jp-compress-original-remove EN/V1
-jp-compress-original-remove EN/V1 --and FR/Product_Test
-jp-compress-original-remove EN/V1 --not FR/Product_Test
+jp-compress-original-remove EN/V1 --and FR/V2
 ```
 
-### jp-help
+### `jp-help`
 
-Mostra ajuda no terminal.
+Mostra ajuda colorida, exemplos globais, filtros, comandos avancados e exemplos dinamicos baseados no projeto atual.
 
 ```bash
 jp-help
 ```
 
-O diferencial e que ele tenta detectar a estrutura da pasta atual e exibir exemplos reais com os nomes encontrados ali.
+## Erros E Protecoes
+
+Os comandos tentam interromper a execucao antes de alterar arquivos quando encontram:
+
+- filtro inexistente;
+- caminho com `/` ausente;
+- diferenca de maiusculas/minusculas;
+- imagem sem extensao ou com nome incorreto;
+- `--and` ou `--not` sem valor;
+- HTML sem referencia direta de video;
+- pasta sem estrutura valida de banner.
+
+As mensagens mostram o motivo e, quando possivel, sugerem nomes reais encontrados no projeto.
+
+## Dependencias
+
+Os instaladores tentam instalar ou configurar:
+
+- Node.js
+- Playwright
+- Chromium
+- FFmpeg
+- ImageMagick
+- `jpegoptim`
+- `pngquant`
+- `oxipng`
+- ferramentas WebP
+
+No Windows, algumas otimizacoes dependem do que estiver disponivel no sistema. O `jp-compress` usa ImageMagick ou FFmpeg como fallback quando necessario.
+
+## Estrutura Do Pacote
+
+```text
+INSTALL-MAC.command          instalador para Mac
+INSTALL-WINDOWS.bat          instalador para Windows
+UNINSTALL-MAC.command        desinstalador para Mac
+UNINSTALL-WINDOWS.bat        desinstalador para Windows
+scripts/                     logica interna de instalacao/desinstalacao
+tools/                       comandos do JP Tools
+```
+
+A pasta `scripts/` e necessaria. Os arquivos da raiz sao os inicializadores amigaveis; eles chamam os scripts internos.
 
 ## Transparencia
 
-Este projeto e aberto para que o time consiga conferir o codigo antes de instalar.
-
-Alguns pontos importantes:
-
-- Os comandos sao scripts locais.
-- O instalador copia os scripts para `~/bin` no Mac ou `%USERPROFILE%\\bin` no Windows.
-- O instalador baixa dependencias conhecidas, como Node, Playwright, Chromium, FFmpeg e ImageMagick.
-- Nao existe servidor proprio ou telemetria nestes scripts.
-- Antes de instalar, voce pode abrir qualquer arquivo em `tools/` ou `scripts/` e revisar linha por linha.
+- Os comandos sao scripts locais e podem ser lidos em `tools/`.
+- Os instaladores podem ser revisados em `scripts/`.
+- No Mac, os comandos sao instalados em `~/bin`.
+- No Windows, sao instalados em `%USERPROFILE%\\bin`.
+- Nao existe telemetria nem upload automatico dos projetos.
+- Dependencias sao baixadas de seus gerenciadores oficiais durante a instalacao.
 
 ## Limitacoes
 
-- O `jp-capture` usa Playwright/Chromium para capturar previews, entao depende dessas ferramentas estarem instaladas corretamente.
-- O `jp-poster` pode falhar em videos remotos com restricao de acesso/CORS.
-- O `jp-compress` depende dos otimizadores disponiveis no sistema. Se um otimizador nao existir, usa fallback quando possivel.
-- Filtros sao intencionalmente rigidos. Se o case ou o caminho estiver errado, o comando falha para evitar alteracoes acidentais.
+- `jp-capture` depende de Playwright e Chromium.
+- Videos remotos podem bloquear acesso ou captura.
+- O filtro HTML do `jp-poster` considera referencias de video presentes diretamente naquele HTML; um video definido apenas dentro de logica JS compartilhada nao pode ser associado com seguranca a um painel especifico.
+- A compressao depende dos otimizadores instalados no sistema.
+- Filtros sao intencionalmente rigidos para evitar alteracoes acidentais.
 
-## Atualizacao
+## Novidades Da Versao 1.2.0
 
-Para atualizar, baixe a release mais recente e rode novamente:
-
-```text
-INSTALL-MAC.command
-INSTALL-WINDOWS.bat
-```
-
-O instalador sobrescreve os comandos do JP Tools com a versao nova.
+- filtro de `jp-poster` por nome de HTML em todas as versoes;
+- tempos diferentes por grupo HTML usando `--and`;
+- aviso para HTML encontrado sem referencia direta de video;
+- suporte a DSK e MSK abertos separadamente em workspace multi-root do VS Code;
+- deteccao DSK/MSK por versao no `jp-capture`;
+- `jp-help` reorganizado e mais explicativo;
+- README e instaladores atualizados.

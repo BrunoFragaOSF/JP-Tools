@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.0`
+**Versao atual:** `1.2.1`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK e MSK.
 
@@ -61,7 +61,7 @@ Os comandos sem filtro sao globais dentro do escopo detectado. Isso significa qu
 
 1. Abra a aba **Releases** deste repositorio.
 2. Entre na release mais recente.
-3. Baixe `JP-Tools-v1.2.0.zip`.
+3. Baixe `JP-Tools-v1.2.1.zip`.
 4. Descompacte a pasta.
 5. Rode o instalador do seu sistema.
 
@@ -169,6 +169,25 @@ As regras principais sao:
 - imagens devem usar nome completo, extensao e case exato;
 - no `jp-poster` e `jp-compress`, ajustes depois de `--and` valem apenas para aquele grupo.
 
+No `jp-poster`, existe uma forma especial de combinar um padrao global com excecoes:
+
+```bash
+jp-poster 20 --and 5 F1
+```
+
+Como nao existe filtro antes do primeiro `--and`, o segundo `20` vale globalmente. A pasta `F1` usa o segundo `5`. O `--and` continua exigindo ajustes/filtro depois dele.
+
+As excecoes podem ser encadeadas:
+
+```bash
+jp-poster 20 --and 5 F1 --and 15 expanded_video.html
+```
+
+- o restante do projeto usa o segundo `20`;
+- `F1` usa o segundo `5`;
+- os paineis `expanded_video.html` usam o segundo `15`;
+- quando dois filtros combinam com o mesmo video, o ultimo grupo escrito tem prioridade.
+
 ## Filtro Por HTML No `jp-poster`
 
 O HTML pode ser usado diretamente como filtro, sem informar a pasta da versao.
@@ -271,6 +290,8 @@ jp-poster 5 expanded_video.html
 jp-poster 5 expanded_video.html --and 20 left.html
 jp-poster 5 DSK/F1/banner/expanded_video.html
 jp-poster 9x16 5 EN/V1 --and 2 NL/V2
+jp-poster 20 --and 5 F1
+jp-poster 20 --and 5 F1 --and 15 expanded_video.html
 ```
 
 Formatos aceitos:
@@ -407,12 +428,11 @@ A pasta `scripts/` e necessaria. Os arquivos da raiz sao os inicializadores amig
 - A compressao depende dos otimizadores instalados no sistema.
 - Filtros sao intencionalmente rigidos para evitar alteracoes acidentais.
 
-## Novidades Da Versao 1.2.0
+## Novidades Da Versao 1.2.1
 
-- filtro de `jp-poster` por nome de HTML em todas as versoes;
-- tempos diferentes por grupo HTML usando `--and`;
-- aviso para HTML encontrado sem referencia direta de video;
-- suporte a DSK e MSK abertos separadamente em workspace multi-root do VS Code;
-- deteccao DSK/MSK por versao no `jp-capture`;
-- `jp-help` reorganizado e mais explicativo;
-- README e instaladores atualizados.
+- configuracao global de poster seguida por excecoes, como `jp-poster 20 --and 5 F1`;
+- varias excecoes de pasta, versao ou HTML no mesmo comando;
+- prioridade para o ultimo filtro compativel, permitindo que um HTML especifico substitua a configuracao geral da pasta;
+- preservacao do comportamento existente para comandos que comecam diretamente por um filtro;
+- validacao de `--and` incompleto e de filtros de excecao inexistentes;
+- `jp-help` e README atualizados com exemplos dinamicos e explicacao de conflitos entre filtros.

@@ -60,7 +60,7 @@ const presetSizes = {
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
     console.log("Usage: jp-poster [16x9|9x16|1x1|WxH] [seconds] [folderFilter|htmlFilter]");
     console.log("       jp-poster-remove [folderFilter]");
-    console.log("Examples: jp-poster 16x9 2 | jp-poster 25 left.html --and 10 right.html | jp-poster 10 main.html");
+    console.log("Examples: jp-poster 16x9 2 | jp-poster 25 left.html --and 10 right.html | jp-poster 20 --and 5 F1");
     console.log("          jp-poster-remove | jp-poster-remove FR/Product_Test --and NL/V2 | jp-poster-remove FR/Product_Test --not DE/Simulated_DSK");
     console.log("Default size: 16x9. Default time: 1s.");
     console.log("Finds local videos and video URLs referenced in index/banner HTML, JS or JSON.");
@@ -70,6 +70,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
     console.log("HTML path: DSK/F1/banner/expanded_video.html limits the poster to that specific panel.");
     console.log("HTML filters require a direct video reference in that HTML; files without video are reported and ignored.");
     console.log("Settings: size/time before the first filter become defaults. After --and, they apply only to that group, like jp-poster 5 V1 --and 2 V2.");
+    console.log("Global override: jp-poster 20 --and 5 F1 uses 20s globally and 5s in F1. Later matching groups have priority.");
     console.log("Advanced override: JP_POSTER_QUALITY=90 JP_POSTER_FIT=cover");
     process.exit(0);
 }
@@ -85,7 +86,7 @@ function parseFixedNumber(value) {
 
 function parsePosterArgs(args) {
     if (commandIsRemove) {
-        return { sizeArg: undefined, secondArg: undefined, targetParts: args.slice(), targetGroups: [] };
+        return { sizeArg: undefined, secondArg: undefined, targetParts: args.slice(), targetGroups: [], useGlobalScope: false };
     }
 
     let sizeArg;
@@ -95,6 +96,7 @@ function parsePosterArgs(args) {
     let currentGroup = { filterParts: [], sizeArg: undefined, secondArg: undefined };
     let atGroupStart = true;
     let mode = "include";
+    let useGlobalScope = false;
 
     function pushGroup() {
         const filter = cleanFilter(currentGroup.filterParts.join(" "));
@@ -114,6 +116,18 @@ function parsePosterArgs(args) {
         const numberArg = parseFixedNumber(token);
 
         if (lowerArg === "--and") {
+            const hasGlobalSettings = Boolean(sizeArg) || secondArg !== undefined;
+            const startsGlobalOverrides = !useGlobalScope && !targetParts.length &&
+                !currentGroup.filterParts.length && !currentGroup.sizeArg &&
+                currentGroup.secondArg === undefined && hasGlobalSettings;
+
+            if (startsGlobalOverrides) {
+                useGlobalScope = true;
+                atGroupStart = true;
+                mode = "include";
+                continue;
+            }
+
             pushGroup();
             targetParts.push(arg);
             atGroupStart = true;
@@ -122,6 +136,13 @@ function parsePosterArgs(args) {
         }
 
         if (lowerArg === "--not") {
+            if (useGlobalScope && !targetParts.length && !currentGroup.filterParts.length) {
+                fail("The global --and must be followed by an override filter.", [
+                    "Put the override settings and folder/HTML after --and.",
+                    "Example: jp-poster 20 --and 5 F1"
+                ]);
+            }
+
             pushGroup();
             targetParts.push(arg);
             atGroupStart = false;
@@ -130,7 +151,7 @@ function parsePosterArgs(args) {
         }
 
         if (mode === "include" && atGroupStart && isPosterSizeOption(lowerArg)) {
-            if (!targetParts.length && !currentGroup.filterParts.length && !sizeArg) {
+            if (!useGlobalScope && !targetParts.length && !currentGroup.filterParts.length && !sizeArg) {
                 sizeArg = lowerArg;
             } else {
                 currentGroup.sizeArg = lowerArg;
@@ -139,7 +160,7 @@ function parsePosterArgs(args) {
         }
 
         if (mode === "include" && atGroupStart && Number.isFinite(numberArg)) {
-            if (!targetParts.length && !currentGroup.filterParts.length && secondArg === undefined) {
+            if (!useGlobalScope && !targetParts.length && !currentGroup.filterParts.length && secondArg === undefined) {
                 secondArg = numberArg;
             } else {
                 currentGroup.secondArg = numberArg;
@@ -154,7 +175,14 @@ function parsePosterArgs(args) {
 
     pushGroup();
 
-    return { sizeArg, secondArg, targetParts, targetGroups };
+    if (useGlobalScope && !targetGroups.some((group) => group.filter)) {
+        fail("The global --and is missing its override filter.", [
+            "Add a folder/version or HTML after the override settings.",
+            "Example: jp-poster 20 --and 5 F1"
+        ]);
+    }
+
+    return { sizeArg, secondArg, targetParts, targetGroups, useGlobalScope };
 }
 
 const parsedArgs = parsePosterArgs(rawArgs);
@@ -175,7 +203,10 @@ const posterGroups = parsedArgs.targetGroups.map((group) => ({
 }));
 
 const targetFilter = targetParts.join(" ").trim();
-const targetFilters = splitPathFilters(targetParts);
+const validationFilters = splitPathFilters(targetParts);
+const targetFilters = parsedArgs.useGlobalScope
+    ? { includes: [], excludes: validationFilters.excludes }
+    : validationFilters;
 const quality = clamp(Number(process.env.JP_POSTER_QUALITY || 90), 1, 100);
 const objectFit = (process.env.JP_POSTER_FIT || "cover").toLowerCase() === "contain" ? "contain" : "cover";
 
@@ -600,7 +631,7 @@ function matchesTarget(filePath) {
 }
 
 function hasHtmlFilter() {
-    return [...targetFilters.includes, ...targetFilters.excludes]
+    return [...validationFilters.includes, ...validationFilters.excludes]
         .some((filter) => /\.html?$/i.test(cleanFilter(filter)));
 }
 
@@ -622,7 +653,7 @@ function collectReferenceFiles(searchRoot) {
 }
 
 function reportHtmlFilterMatches() {
-    const htmlFilters = targetFilters.includes.filter((filter) => /\.html?$/i.test(cleanFilter(filter)));
+    const htmlFilters = validationFilters.includes.filter((filter) => /\.html?$/i.test(cleanFilter(filter)));
     if (!htmlFilters.length) return;
 
     const htmlFiles = searchRoots.flatMap((searchRoot) => walkFiles(searchRoot, (filePath) => /\.html?$/i.test(filePath)));
@@ -744,6 +775,22 @@ function dedupeSources(sources) {
     return result;
 }
 
+function removeReferencedLocalDuplicates(localSources, referencedSources) {
+    const referencedKeys = new Set();
+
+    referencedSources.forEach((item) => {
+        const resolvedSource = resolveSource(item);
+        if (!resolvedSource || !resolvedSource.filePath) return;
+        referencedKeys.add(resolvedSource.filePath + "|" + item.outputDir);
+    });
+
+    return localSources.filter((item) => {
+        const resolvedSource = resolveSource(item);
+        if (!resolvedSource || !resolvedSource.filePath) return true;
+        return !referencedKeys.has(resolvedSource.filePath + "|" + item.outputDir);
+    });
+}
+
 function resolveSource(item) {
     if (/^https?:\/\//i.test(item.source)) {
         return { url: item.source, kind: "remote" };
@@ -853,10 +900,16 @@ function posterConfigForItem(item) {
         item.resolvedSource && item.resolvedSource.filePath
     ].filter(Boolean);
 
-    const group = posterGroups.find((candidate) => {
-        if (!candidate.filter) return false;
-        return matchPaths.some((filePath) => matchPathFilter(filePath, candidate.filter));
-    });
+    let group;
+
+    for (let index = posterGroups.length - 1; index >= 0; index--) {
+        const candidate = posterGroups[index];
+        if (!candidate.filter) continue;
+        if (matchPaths.some((filePath) => matchPathFilter(filePath, candidate.filter))) {
+            group = candidate;
+            break;
+        }
+    }
 
     return group || defaultPosterConfig;
 }
@@ -1033,7 +1086,7 @@ video {
 }
 
 async function main() {
-    validatePathFilters(targetFilters);
+    validatePathFilters(validationFilters);
 
     if (shouldRemove) {
         removePosters();
@@ -1042,10 +1095,15 @@ async function main() {
 
     reportHtmlFilterMatches();
 
-    const localSources = hasHtmlFilter()
+    let localSources = hasHtmlFilter() && !parsedArgs.useGlobalScope
         ? []
         : searchRoots.flatMap(collectLocalVideos);
     const referencedSources = searchRoots.flatMap(collectReferenceFiles).flatMap(extractVideoReferences);
+
+    if (parsedArgs.useGlobalScope) {
+        localSources = removeReferencedLocalDuplicates(localSources, referencedSources);
+    }
+
     const sources = dedupeSources([...localSources, ...referencedSources]);
 
     if (!sources.length) {

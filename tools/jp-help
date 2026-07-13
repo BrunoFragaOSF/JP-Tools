@@ -7,7 +7,7 @@ const { resolveProjectContext } = require("./jp-project-roots");
 const projectContext = resolveProjectContext(process.cwd());
 const root = projectContext.root;
 const searchRoots = projectContext.searchRoots;
-const version = "1.2.0";
+const version = "1.2.1";
 const useColor = process.stdout.isTTY;
 const c = {
     reset: useColor ? "\x1b[0m" : "",
@@ -306,7 +306,9 @@ function buildExamples() {
             "jp-poster 5 " + firstVideoHtml.name,
             "jp-poster 5 " + firstVideoHtml.name + " --and 20 " + secondVideoHtml.name,
             "jp-poster 5 " + firstVideoHtml.path,
-            second !== first ? "jp-poster 16x9 5 " + first + " --and 2 " + second : "jp-poster 16x9 5 " + first
+            second !== first ? "jp-poster 16x9 5 " + first + " --and 2 " + second : "jp-poster 16x9 5 " + first,
+            "jp-poster 20 --and 5 " + first,
+            "jp-poster 20 --and 5 " + first + " --and 15 " + firstVideoHtml.name
         ],
         posterRemove: [
             "jp-poster-remove",
@@ -370,6 +372,14 @@ console.log("  " + operatorText("--and") + ": adiciona outro grupo. " + operator
 console.log("  Ordem obrigatoria: " + commandText("comando") + " -> " + optionText("ajustes") + " -> " + filterText("filtros") + ".");
 console.log("  Pastas usam / para niveis: " + filterText(examples.scope1) + ". Nomes e caminhos sao case-sensitive.");
 
+title("Padrao global e excecoes no jp-poster");
+console.log("  " + colorExample(examples.poster[5]));
+console.log("    O segundo 20 vale para todo o escopo; somente " + filterText(examples.scope1) + " usa o segundo 5.");
+console.log("  " + colorExample(examples.poster[6]));
+console.log("    O padrao continua em 20, " + filterText(examples.scope1) + " usa 5 e " + filterText(examples.htmlName1) + " usa 15.");
+console.log("  Quando mais de um filtro combina com o mesmo video, o ultimo grupo escrito tem prioridade.");
+console.log("  O primeiro " + operatorText("--and") + " pode vir logo apos os ajustes globais para iniciar as excecoes; ainda precisa existir um filtro depois dele.");
+
 title("Filtro HTML no jp-poster");
 console.log("  " + colorExample(examples.poster[1]));
 console.log("    Procura todo HTML com esse nome exato no escopo detectado.");
@@ -405,7 +415,7 @@ command(
     "jp-poster [proporcao|WxH] [segundos] [filtro de pasta|HTML]",
     "Gera poster.jpg, poster2.jpg... em banner/assets. Padrao: 16x9 no segundo 1.",
     examples.poster,
-    ["Somente o nome HTML aplica o filtro globalmente: " + colorExample(examples.poster[1]), "Tempos diferentes por HTML: " + colorExample(examples.poster[2]), "Uma versao especifica usa o caminho completo: " + colorExample(examples.poster[3])]
+    ["Somente o nome HTML aplica o filtro globalmente: " + colorExample(examples.poster[1]), "Tempos diferentes por HTML: " + colorExample(examples.poster[2]), "Padrao global com excecao: " + colorExample(examples.poster[5]), "O ultimo filtro compativel vence: " + colorExample(examples.poster[6]), "Uma versao especifica usa o caminho completo: " + colorExample(examples.poster[3])]
 );
 command(
     "jp-poster-remove [filtro]",

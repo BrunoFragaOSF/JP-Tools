@@ -4,6 +4,10 @@ $ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path
 $ToolsDir = Join-Path $ScriptDir "tools"
 $BinDir = Join-Path $env:USERPROFILE "bin"
 $ToolInstallDir = Join-Path $BinDir "jp-tools"
+$NodeVersion = "24.18.0"
+$FfmpegVersion = "8.1.2"
+$ImageMagickVersion = "7.1.2.27"
+$PlaywrightVersion = "1.61.1"
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ToolInstallDir | Out-Null
@@ -51,6 +55,14 @@ function Invoke-Tool($commandPath, $arguments) {
     }
 }
 
+function Install-WinGetPackage($id, $version) {
+    Write-Host "Instalando $id $version..."
+    & winget install --id $id --version $version -e --accept-source-agreements --accept-package-agreements
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "O WinGet nao instalou $id $version. A versao pode ja estar instalada; o ambiente sera validado em seguida."
+    }
+}
+
 Copy-Tool "jp-capture"
 Copy-Tool "jp-poster"
 Copy-Tool "jp-compress"
@@ -73,9 +85,9 @@ if (($userPath -split ";") -notcontains $BinDir) {
 $env:Path = "$env:Path;$BinDir"
 
 if (Has-Command "winget") {
-    winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements
-    winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements
-    winget install --id ImageMagick.ImageMagick -e --accept-source-agreements --accept-package-agreements
+    Install-WinGetPackage "OpenJS.NodeJS.LTS" $NodeVersion
+    Install-WinGetPackage "Gyan.FFmpeg" $FfmpegVersion
+    Install-WinGetPackage "ImageMagick.ImageMagick" $ImageMagickVersion
 } else {
     Write-Host "winget nao encontrado. Instale Node.js, FFmpeg e ImageMagick manualmente."
 }
@@ -91,18 +103,24 @@ if (-not $nodePath -or -not $npmPath -or -not $npxPath) {
     exit 1
 }
 
-Write-Host "Instalando Playwright e Chromium..."
-Invoke-Tool $npmPath @("install", "-g", "playwright")
-Invoke-Tool $npxPath @("playwright", "install", "chromium")
+$actualNodeVersion = (& $nodePath "--version").Trim().TrimStart("v")
+if ($actualNodeVersion -ne $NodeVersion) {
+    throw "JP Tools requer Node $NodeVersion no Windows. Versao encontrada: $actualNodeVersion."
+}
+
+Write-Host "Instalando Playwright $PlaywrightVersion e o Chromium correspondente..."
+Invoke-Tool $npmPath @("install", "-g", "playwright@$PlaywrightVersion")
+Invoke-Tool $npxPath @("--yes", "playwright@$PlaywrightVersion", "install", "chromium")
 
 $globalRoot = (& $npmPath "root" "-g").Trim()
-& $nodePath -e "require(process.argv[1] + '/playwright')" $globalRoot
+& $nodePath -e "var pkg=require(process.argv[1] + '/playwright/package.json'); process.exit(pkg.version === process.argv[2] ? 0 : 1)" $globalRoot $PlaywrightVersion
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Playwright nao ficou acessivel para o Node. Rode: npm install -g playwright && npx playwright install chromium"
+    Write-Host "Playwright $PlaywrightVersion nao ficou acessivel para o Node."
     exit 1
 }
 
 Write-Host ""
 Write-Host "JP Tools instalado. Abra um novo terminal do VSCode."
+Write-Host "Dependencias homologadas: Node $NodeVersion, Playwright $PlaywrightVersion, FFmpeg $FfmpegVersion e ImageMagick $ImageMagickVersion."
 Write-Host "Teste com: jp-help"
 Write-Host "No Windows, jp-compress usa ImageMagick/FFmpeg como fallback. Para compressao mais forte de PNG/JPG, jpegoptim/pngquant/oxipng/cwebp via Scoop/Chocolatey ainda podem melhorar o resultado."

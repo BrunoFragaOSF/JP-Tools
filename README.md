@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.2`
+**Versao atual:** `1.2.3`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK e MSK.
 
@@ -83,6 +83,22 @@ O bootstrap baixa o mesmo `JP-Tools.zip`, valida a estrutura e executa o instala
 - Windows: `%USERPROFILE%\bin`.
 
 Os caminhos e lançadores internos sao diferentes em cada sistema, mas os comandos usados no terminal sao os mesmos: `jp-capture`, `jp-poster`, `jp-compress`, `jp-help` etc.
+
+### Versoes Homologadas
+
+O instalador nao busca mais qualquer versao nova do Playwright ou qualquer nova linha principal das dependencias. A base homologada para esta release e:
+
+| Dependencia | Mac | Windows |
+| --- | --- | --- |
+| Node.js | linha LTS 24, fixada pelo Homebrew | `24.18.0` |
+| Playwright | `1.61.1` | `1.61.1` |
+| Chromium | versao fornecida pelo Playwright `1.61.1` | versao fornecida pelo Playwright `1.61.1` |
+| FFmpeg | linha 8, fixada pelo Homebrew | `8.1.2` |
+| ImageMagick | linha 7, fixada pelo Homebrew | `7.1.2.27` |
+
+No Mac, o Homebrew instala as linhas homologadas e aplica `brew pin` para impedir upgrades automaticos dessas formulas. `jpegoptim`, `pngquant`, `oxipng` e WebP tambem ficam fixados na versao instalada. No Windows, o WinGet recebe os numeros exatos listados acima.
+
+As versoes so devem mudar em uma nova release do JP Tools, depois de validacao. O instalador tambem confere Node e Playwright antes de concluir.
 
 ### Teste Depois De Instalar
 
@@ -428,12 +444,13 @@ A pasta `scripts/` e necessaria. Os bootstraps publicos baixam o pacote e chamam
 - A compressao depende dos otimizadores instalados no sistema.
 - Filtros sao intencionalmente rigidos para evitar alteracoes acidentais.
 
-## Novidades Da Versao 1.2.2
+## Novidades Da Versao 1.2.3
 
-- instalacao direta pelo GitHub no Mac e no Windows;
-- um comando permanente para cada sistema, sem numero de versao na URL;
-- download automatico do pacote universal `JP-Tools.zip` da release mais recente;
-- validacao da estrutura antes de iniciar a instalacao;
-- instaladores e desinstaladores de duplo clique removidos;
-- comandos de desinstalacao direta adicionados ao README;
-- explicacao das pastas `~/bin` e `%USERPROFILE%\bin`.
+- Playwright fixado em `1.61.1`, incluindo o Chromium correspondente;
+- Node padronizado na linha LTS 24 nos dois sistemas;
+- FFmpeg mantido na linha 8 e ImageMagick na linha 7;
+- versoes exatas definidas para as dependencias instaladas pelo WinGet;
+- formulas do Homebrew fixadas com `brew pin` depois da instalacao;
+- validacao das versoes de Node e Playwright antes de concluir;
+- ImageOptim e ImageOptim CLI removidos por nao serem usados pelo `jp-compress`;
+- tabela de versoes homologadas adicionada ao README.

@@ -24,7 +24,7 @@ remove_path_line() {
     local file="$1"
     [ -f "$file" ] || return 0
     local tmp="$file.jp-tools-clean"
-    grep -vx 'export PATH="$HOME/bin:$PATH"' "$file" > "$tmp" || true
+    grep -Ev '^(export PATH="\$HOME/bin:\$PATH"|export PATH="[^"]*/opt/node@24/bin:\$PATH")$' "$file" > "$tmp" || true
     mv "$tmp" "$file"
 }
 
@@ -50,7 +50,9 @@ read -r answer
 case "$answer" in
     y|Y|yes|YES|s|S|sim|SIM)
         if command -v brew >/dev/null 2>&1; then
-            brew uninstall --ignore-dependencies node ffmpeg jpegoptim pngquant oxipng webp imagemagick imageoptim-cli 2>/dev/null || true
+            brew unpin node@24 ffmpeg@8 jpegoptim pngquant oxipng webp imagemagick@7 2>/dev/null || true
+            brew uninstall --ignore-dependencies node@24 ffmpeg@8 jpegoptim pngquant oxipng webp imagemagick@7 2>/dev/null || true
+            brew uninstall --ignore-dependencies node imageoptim-cli 2>/dev/null || true
             brew uninstall --cask imageoptim 2>/dev/null || true
             brew cleanup 2>/dev/null || true
         else

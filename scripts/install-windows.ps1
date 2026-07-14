@@ -21,12 +21,29 @@ function Add-PathIfExists($pathToAdd) {
     }
 }
 
+function Add-MatchingDirectories($pathPattern) {
+    if (-not $pathPattern) { return }
+    Get-ChildItem -Path $pathPattern -Directory -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        ForEach-Object { Add-PathIfExists $_.FullName }
+}
+
 function Refresh-ToolPath() {
-    Add-PathIfExists (([Environment]::GetFolderPath("ProgramFiles")) + "\nodejs")
-    Add-PathIfExists (([Environment]::GetFolderPath("ProgramFilesX86")) + "\nodejs")
+    $processPath = $env:Path
+    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = (@($machinePath, $userPath, $processPath) | Where-Object { $_ }) -join ";"
+
+    $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+    $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+    Add-PathIfExists (Join-Path $programFiles "nodejs")
+    if ($programFilesX86) { Add-PathIfExists (Join-Path $programFilesX86 "nodejs") }
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Programs\nodejs")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links")
     Add-PathIfExists (Join-Path $env:APPDATA "npm")
+    Add-MatchingDirectories (Join-Path $programFiles "ImageMagick-*")
+    if ($programFilesX86) { Add-MatchingDirectories (Join-Path $programFilesX86 "ImageMagick-*") }
+    Add-MatchingDirectories (Join-Path $env:LOCALAPPDATA "Programs\ImageMagick-*")
 }
 
 function Resolve-CommandPath($names) {
@@ -121,8 +138,14 @@ $npmPath = Resolve-CommandPath @("npm.cmd", "npm")
 $ffmpegPath = Resolve-CommandPath @("ffmpeg.exe", "ffmpeg")
 $magickPath = Resolve-CommandPath @("magick.exe", "magick")
 
-if (-not $nodePath -or -not $npmPath -or -not $ffmpegPath -or -not $magickPath) {
-    throw "JP Tools error: Node, npm, FFmpeg ou ImageMagick nao foi encontrado apos a instalacao. Abra um terminal novo e execute o instalador novamente."
+$missingTools = @()
+if (-not $nodePath) { $missingTools += "Node (node.exe)" }
+if (-not $npmPath) { $missingTools += "npm (npm.cmd)" }
+if (-not $ffmpegPath) { $missingTools += "FFmpeg (ffmpeg.exe)" }
+if (-not $magickPath) { $missingTools += "ImageMagick (magick.exe)" }
+
+if ($missingTools.Count -gt 0) {
+    throw "JP Tools error: executavel(is) nao encontrado(s) apos recarregar o PATH: $($missingTools -join ', ')."
 }
 
 $actualNodeVersion = (& $nodePath "--version").Trim()
@@ -187,7 +210,7 @@ $playwrightVersion = (& $nodePath "-p" "require(process.argv[1]).version" $playw
 Write-Host ""
 Write-Host "JP Tools instalado. Abra um novo terminal do VSCode."
 Write-Host "Node, Playwright e Chromium foram instalados nas versoes atuais."
-Write-Host "Ferramentas independentes conferidas pelo lock da versao 1.2.3."
+Write-Host "Ferramentas independentes conferidas pelo lock da versao 1.2.5."
 Write-Host "Node $actualNodeVersion | Playwright $playwrightVersion | FFmpeg $($LockedPackages.ffmpeg.version) | ImageMagick $($LockedPackages.imagemagick.version)"
 Write-Host "Teste com: jp-help"
 Write-Host "No Windows, jp-compress usa ImageMagick e FFmpeg como fallback para os otimizadores disponiveis no Mac."

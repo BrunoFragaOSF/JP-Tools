@@ -340,7 +340,7 @@ function splitCommaTerms(text) {
 
 function commandExists(command) {
     const result = process.platform === "win32"
-        ? spawnSync("where", [command], { encoding: "utf8", shell: true })
+        ? spawnSync("where.exe", [command], { encoding: "utf8" })
         : spawnSync("/bin/sh", ["-c", "command -v " + command], { encoding: "utf8" });
     return result.status === 0;
 }

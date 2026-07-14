@@ -2,9 +2,9 @@
 set -e
 
 REPOSITORY="BrunoFragaOSF/JP-Tools"
-ARCHIVE_URL="${JP_TOOLS_ARCHIVE_URL:-https://github.com/$REPOSITORY/releases/latest/download/JP-Tools-mac.zip}"
+ARCHIVE_URL="${JP_TOOLS_ARCHIVE_URL:-https://github.com/$REPOSITORY/releases/latest/download/JP-Tools.zip}"
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/jp-tools-installer.XXXXXX")"
-ARCHIVE_PATH="$TEMP_DIR/JP-Tools-mac.zip"
+ARCHIVE_PATH="$TEMP_DIR/JP-Tools.zip"
 
 cleanup() {
     rm -rf "$TEMP_DIR"
@@ -20,14 +20,14 @@ echo "JP Tools: extraindo o pacote..."
 
 PACKAGE_DIR="$(find "$TEMP_DIR/package" -mindepth 1 -maxdepth 1 -type d -name 'JP-Tools-*' -print | head -n 1)"
 
-if [ -z "$PACKAGE_DIR" ] || [ ! -f "$PACKAGE_DIR/INSTALL-MAC.command" ] || [ ! -f "$PACKAGE_DIR/scripts/install-mac.command" ]; then
+if [ -z "$PACKAGE_DIR" ] || [ ! -f "$PACKAGE_DIR/scripts/install-mac.sh" ] || [ ! -d "$PACKAGE_DIR/tools" ]; then
     echo "JP Tools error: o pacote baixado nao possui a estrutura esperada." >&2
     echo "Origem: $ARCHIVE_URL" >&2
     exit 1
 fi
 
 xattr -dr com.apple.quarantine "$PACKAGE_DIR" 2>/dev/null || true
-chmod +x "$PACKAGE_DIR/INSTALL-MAC.command" "$PACKAGE_DIR/scripts/install-mac.command"
+chmod +x "$PACKAGE_DIR/scripts/install-mac.sh"
 
 if [ "${JP_TOOLS_BOOTSTRAP_TEST:-0}" = "1" ]; then
     echo "JP Tools: pacote validado em modo de teste."
@@ -35,4 +35,4 @@ if [ "${JP_TOOLS_BOOTSTRAP_TEST:-0}" = "1" ]; then
 fi
 
 echo "JP Tools: iniciando a instalacao..."
-/bin/bash "$PACKAGE_DIR/INSTALL-MAC.command"
+/bin/bash "$PACKAGE_DIR/scripts/install-mac.sh"

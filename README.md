@@ -57,49 +57,32 @@ Os comandos sem filtro sao globais dentro do escopo detectado. Isso significa qu
 
 ## Instalacao Completa
 
-### Download Manual
-
-Use este caminho para Windows ou como alternativa manual no Mac:
-
-1. Abra a aba **Releases** deste repositorio.
-2. Entre na release mais recente.
-3. Baixe `JP-Tools-v1.2.2.zip`.
-4. Descompacte a pasta.
-5. Rode o instalador do seu sistema.
-
 ### Mac
 
-O metodo recomendado evita o bloqueio do Gatekeeper em arquivos baixados pelo navegador. Abra o Terminal, cole o comando completo abaixo e pressione Enter:
+Abra o Terminal, cole o comando completo abaixo e pressione Enter:
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/bootstrap-mac.sh)"
 ```
 
-O bootstrap baixa `JP-Tools-mac.zip` da release mais recente, valida a estrutura e executa o instalador pelo Terminal. O mesmo comando continua valido nas proximas versoes.
-
-Como alternativa, baixe o ZIP e tente abrir:
-
-```text
-INSTALL-MAC.command
-```
-
-Como esse arquivo nao possui assinatura Developer ID, o macOS pode bloquea-lo quando ele e aberto pelo Finder. Nesse caso, use o comando recomendado acima ou abra o Terminal dentro da pasta descompactada e rode:
-
-```bash
-xattr -dr com.apple.quarantine .
-chmod +x INSTALL-MAC.command scripts/install-mac.command
-bash INSTALL-MAC.command
-```
+O bootstrap baixa `JP-Tools.zip` da release mais recente, valida a estrutura e executa o instalador pelo Terminal. Nao e necessario baixar, descompactar ou abrir arquivos pelo Finder.
 
 ### Windows
 
-Clique duas vezes em:
+Abra o PowerShell, cole o comando completo abaixo e pressione Enter:
 
-```text
-INSTALL-WINDOWS.bat
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod 'https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/bootstrap-windows.ps1' | Invoke-Expression"
 ```
 
-Se Node acabou de ser instalado e ainda nao apareceu no `PATH`, abra um novo terminal e rode o instalador novamente.
+O bootstrap baixa o mesmo `JP-Tools.zip`, valida a estrutura e executa o instalador PowerShell. Nao e necessario baixar ou abrir um `.bat`.
+
+### Onde Fica Instalado
+
+- Mac: `~/bin`.
+- Windows: `%USERPROFILE%\bin`.
+
+Os caminhos e lançadores internos sao diferentes em cada sistema, mas os comandos usados no terminal sao os mesmos: `jp-capture`, `jp-poster`, `jp-compress`, `jp-help` etc.
 
 ### Teste Depois De Instalar
 
@@ -113,15 +96,20 @@ O help detecta pastas, versoes, HTMLs de video e imagens reais do projeto para m
 
 ### Atualizacao
 
-Baixe a release nova e rode novamente o mesmo instalador. Ele substitui os comandos antigos pelos novos.
+Rode novamente o comando de instalacao do seu sistema. Ele baixa a release mais recente e substitui os comandos antigos.
 
 ### Desinstalacao
 
-Use um destes arquivos:
+Mac:
 
-```text
-UNINSTALL-MAC.command
-UNINSTALL-WINDOWS.bat
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/uninstall-mac.sh)"
+```
+
+Windows:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod 'https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/uninstall-windows.ps1' | Invoke-Expression"
 ```
 
 O desinstalador remove o JP Tools e pergunta antes de remover dependencias compartilhadas como Node, FFmpeg, ImageMagick, Playwright e Chromium.
@@ -411,16 +399,17 @@ No Windows, algumas otimizacoes dependem do que estiver disponivel no sistema. O
 ## Estrutura Do Pacote
 
 ```text
-INSTALL-MAC.command          instalador para Mac
-INSTALL-WINDOWS.bat          instalador para Windows
-UNINSTALL-MAC.command        desinstalador para Mac
-UNINSTALL-WINDOWS.bat        desinstalador para Windows
-scripts/                     logica interna de instalacao/desinstalacao
-scripts/bootstrap-mac.sh     instalacao pelo GitHub sem abrir arquivo pelo Finder
-tools/                       comandos do JP Tools
+README.md                       documentacao completa
+scripts/bootstrap-mac.sh        download e instalacao no Mac
+scripts/bootstrap-windows.ps1   download e instalacao no Windows
+scripts/install-mac.sh          instalacao interna no Mac
+scripts/install-windows.ps1     instalacao interna no Windows
+scripts/uninstall-mac.sh        desinstalacao no Mac
+scripts/uninstall-windows.ps1   desinstalacao no Windows
+tools/                          comandos do JP Tools
 ```
 
-A pasta `scripts/` e necessaria. Os arquivos da raiz sao os inicializadores amigaveis; eles chamam os scripts internos.
+A pasta `scripts/` e necessaria. Os bootstraps publicos baixam o pacote e chamam os instaladores internos adequados ao sistema.
 
 ## Transparencia
 
@@ -441,9 +430,10 @@ A pasta `scripts/` e necessaria. Os arquivos da raiz sao os inicializadores amig
 
 ## Novidades Da Versao 1.2.2
 
-- instalacao recomendada no Mac por um unico comando executado no Terminal;
-- download automatico de `JP-Tools-mac.zip` a partir da release mais recente;
-- validacao da estrutura do pacote antes de iniciar o instalador;
-- remocao da quarentena somente depois que o bootstrap ja esta em execucao;
-- comando de instalacao permanente, sem numero de versao na URL;
-- ZIP e `INSTALL-MAC.command` preservados como alternativas manuais.
+- instalacao direta pelo GitHub no Mac e no Windows;
+- um comando permanente para cada sistema, sem numero de versao na URL;
+- download automatico do pacote universal `JP-Tools.zip` da release mais recente;
+- validacao da estrutura antes de iniciar a instalacao;
+- instaladores e desinstaladores de duplo clique removidos;
+- comandos de desinstalacao direta adicionados ao README;
+- explicacao das pastas `~/bin` e `%USERPROFILE%\bin`.

@@ -87,7 +87,7 @@ $npmPath = Resolve-CommandPath @("npm.cmd", "npm")
 $npxPath = Resolve-CommandPath @("npx.cmd", "npx")
 
 if (-not $nodePath -or -not $npmPath -or -not $npxPath) {
-    Write-Host "Node/npm/npx nao foram encontrados apos a instalacao. Abra um novo terminal e rode INSTALL-WINDOWS.bat novamente."
+    Write-Host "Node/npm/npx nao foram encontrados apos a instalacao. Abra um novo terminal e rode novamente o comando de instalacao do README."
     exit 1
 }
 

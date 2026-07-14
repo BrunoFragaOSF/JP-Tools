@@ -58,12 +58,12 @@ brew install --cask imageoptim || true
 export PATH="$HOME/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$PATH"
 
 if ! command -v node >/dev/null 2>&1; then
-    echo "Node nao foi encontrado no PATH apos a instalacao. Abra um novo Terminal e rode INSTALL-MAC.command novamente."
+    echo "Node nao foi encontrado no PATH apos a instalacao. Abra um novo Terminal e rode novamente o comando de instalacao do README."
     exit 1
 fi
 
 if ! command -v npm >/dev/null 2>&1 || ! command -v npx >/dev/null 2>&1; then
-    echo "npm/npx nao foram encontrados no PATH apos instalar Node. Abra um novo Terminal e rode INSTALL-MAC.command novamente."
+    echo "npm/npx nao foram encontrados no PATH apos instalar Node. Abra um novo Terminal e rode novamente o comando de instalacao do README."
     exit 1
 fi
 

@@ -7,7 +7,7 @@ const { resolveProjectContext } = require("./jp-project-roots");
 const projectContext = resolveProjectContext(process.cwd());
 const root = projectContext.root;
 const searchRoots = projectContext.searchRoots;
-const version = "1.2.5";
+const version = "1.2.3";
 const useColor = process.stdout.isTTY;
 const c = {
     reset: useColor ? "\x1b[0m" : "",

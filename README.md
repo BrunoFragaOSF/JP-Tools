@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.5`
+**Versao atual:** `1.2.3`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK e MSK.
 
@@ -458,13 +458,13 @@ A pasta `scripts/` e necessaria. Os bootstraps publicos baixam o pacote e chamam
 - A compressao depende dos otimizadores instalados no sistema.
 - Filtros sao intencionalmente rigidos para evitar alteracoes acidentais.
 
-## Novidades Da Versao 1.2.5
+## Novidades Da Versao 1.2.3
 
 - politica hibrida de dependencias, com Node, Playwright, Chromium e WebP atualizados normalmente;
 - FFmpeg, ImageMagick, jpegoptim, pngquant e oxipng mantidos em versoes homologadas;
 - migracao automatica de instalacoes `node@24` que podiam parar antes de criar os comandos;
 - limpeza restrita a residuos orfaos de npm/corepack, preservando outros modulos globais;
 - instalacao Homebrew sem pergunta interativa de confirmacao;
-- remocao dos pins transitivos criados pela versao 1.2.4;
+- remocao dos pins transitivos criados durante os testes anteriores;
 - validacao real do Chromium depois da instalacao do runtime privado;
 - instaladores, desinstaladores, bootstrap e `jp-help` alinhados com a nova politica.

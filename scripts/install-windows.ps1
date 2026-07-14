@@ -187,7 +187,7 @@ $playwrightVersion = (& $nodePath "-p" "require(process.argv[1]).version" $playw
 Write-Host ""
 Write-Host "JP Tools instalado. Abra um novo terminal do VSCode."
 Write-Host "Node, Playwright e Chromium foram instalados nas versoes atuais."
-Write-Host "Ferramentas independentes conferidas pelo lock da versao 1.2.5."
+Write-Host "Ferramentas independentes conferidas pelo lock da versao 1.2.3."
 Write-Host "Node $actualNodeVersion | Playwright $playwrightVersion | FFmpeg $($LockedPackages.ffmpeg.version) | ImageMagick $($LockedPackages.imagemagick.version)"
 Write-Host "Teste com: jp-help"
 Write-Host "No Windows, jp-compress usa ImageMagick e FFmpeg como fallback para os otimizadores disponiveis no Mac."

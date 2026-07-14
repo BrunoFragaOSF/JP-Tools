@@ -40,7 +40,7 @@ remove_path_line "$HOME/.zshrc"
 remove_path_line "$HOME/.bash_profile"
 remove_path_line "$HOME/.bashrc"
 
-# Legacy cleanup for installations older than 1.2.4.
+# Legacy cleanup for previous installations.
 if command -v npm >/dev/null 2>&1; then
     npm uninstall -g playwright 2>/dev/null || true
 fi

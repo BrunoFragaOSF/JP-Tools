@@ -39,7 +39,7 @@ if ($userPath) {
 $playwrightCache = Join-Path $env:LOCALAPPDATA "ms-playwright"
 Remove-Item -Recurse -Force $playwrightCache -ErrorAction SilentlyContinue
 
-# Legacy cleanup for installations older than 1.2.4.
+# Legacy cleanup for previous installations.
 $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
 if ($npm) {
     & $npm.Source uninstall -g playwright

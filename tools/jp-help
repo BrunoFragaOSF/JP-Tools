@@ -7,7 +7,7 @@ const { resolveProjectContext } = require("./jp-project-roots");
 const projectContext = resolveProjectContext(process.cwd());
 const root = projectContext.root;
 const searchRoots = projectContext.searchRoots;
-const version = "1.2.4";
+const version = "1.2.5";
 const useColor = process.stdout.isTTY;
 const c = {
     reset: useColor ? "\x1b[0m" : "",
@@ -363,10 +363,11 @@ console.log("Sem filtro, o comando e global dentro do escopo detectado. Na maior
 if (dependencyLock) {
     title("Ambiente homologado");
     console.log("  Lock do JP Tools: " + dependencyLock.jpToolsVersion + ".");
-    console.log("  Node: " + dependencyLock.macos.formulae["node@24"].version + " | Playwright: " + dependencyLock.npmRuntime.playwright.version + " | Chromium: " + dependencyLock.npmRuntime.chromium.browserVersion + ".");
-    console.log("  Mac: " + Object.keys(dependencyLock.macos.formulae).length + " formulas com versoes e hashes fixados.");
-    console.log("  Windows: " + Object.keys(dependencyLock.windows.packages).length + " pacotes com versoes e manifestos fixados.");
-    console.log("  O instalador para se uma versao, origem ou hash nao corresponder ao lock.");
+    console.log("  Atualizacao normal: Node.js, Playwright, Chromium e WebP.");
+    console.log("  Versoes fixadas: FFmpeg, ImageMagick, jpegoptim, pngquant e oxipng.");
+    console.log("  Mac: " + Object.keys(dependencyLock.macos.lockedFormulae).length + " ferramentas independentes com versoes e hashes fixados.");
+    console.log("  Windows: " + Object.keys(dependencyLock.windows.lockedPackages).length + " ferramentas independentes com versoes, manifestos e hashes fixados.");
+    console.log("  O instalador para se uma ferramenta independente nao corresponder ao lock homologado.");
 }
 
 title("Escopo detectado");

@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.4`
+**Versao atual:** `1.2.5`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK e MSK.
 
@@ -84,29 +84,31 @@ O bootstrap baixa o mesmo `JP-Tools.zip`, valida a estrutura e executa o instala
 
 Os caminhos e lançadores internos sao diferentes em cada sistema, mas os comandos usados no terminal sao os mesmos: `jp-capture`, `jp-poster`, `jp-compress`, `jp-help` etc.
 
-### Versoes Homologadas E Verificacao
+### Politica De Atualizacao E Verificacao
 
-O instalador usa `dependencies.lock.json` como fonte unica das versoes e hashes permitidos. Ele nao aceita automaticamente uma atualizacao mais recente, mesmo que o Homebrew, npm ou WinGet passe a recomenda-la.
+O JP Tools usa uma politica hibrida. Componentes de plataforma amplamente mantidos sao atualizados normalmente ao executar o instalador. Ferramentas independentes ficam em versoes homologadas, com origem e hashes registrados em `dependencies.lock.json`.
 
 | Dependencia | Mac | Windows |
 | --- | --- | --- |
-| Node.js | `24.18.0` | `24.18.0` |
-| Playwright | `1.61.1` | `1.61.1` |
-| Chromium | `149.0.7827.55`, revisao `1228` | `149.0.7827.55`, revisao `1228` |
+| Node.js | versao atual do Homebrew | LTS atual do WinGet |
+| Playwright | versao atual do npm | versao atual do npm |
+| Chromium | versao compativel atual do Playwright | versao compativel atual do Playwright |
 | FFmpeg | `8.1.2_1` | `8.1.2` |
 | ImageMagick | `7.1.2-27` | `7.1.2.27` |
 | jpegoptim | `1.5.6` | nao instalado |
 | pngquant | `3.0.3` | nao instalado |
 | oxipng | `10.1.1` | nao instalado |
-| WebP | `1.6.0` | fornecido pelos fallbacks instalados |
+| WebP | versao atual do Homebrew | fornecido pelos fallbacks instalados |
 
-No Mac, o lock cobre as 46 formulas Homebrew diretas e transitivas usadas por essa arvore. Antes de instalar, o JP Tools confere versao, revisao, dependencias, hash da formula, origem e hash do bottle compativel com aquele Mac. Depois da instalacao, confere as versoes novamente e aplica `brew pin` em toda a arvore.
+No Mac, FFmpeg, ImageMagick, jpegoptim, pngquant e oxipng sao verificados por versao, revisao, dependencias, hash da formula, origem e hash do bottle compativel. Depois da instalacao, somente essas cinco ferramentas ficam com `brew pin`. Node e WebP continuam livres para receber atualizacoes normais.
 
-No Windows, o instalador confere o hash completo de cada manifesto oficial do WinGet e o hash do instalador homologado para `x64` ou `arm64`. O WinGet faz a segunda verificacao do arquivo ao baixa-lo.
+No Windows, FFmpeg e ImageMagick sao instalados nas versoes homologadas. O instalador confere o hash completo dos manifestos oficiais do WinGet e o hash do instalador para `x64` ou `arm64`. Node usa o LTS atual disponibilizado pelo WinGet.
 
-O Playwright nao e mais instalado globalmente. Ele fica dentro da pasta do JP Tools por meio de `npm ci`, usando um `package-lock.json` que fixa versoes, URLs e integridades SHA-512 da arvore npm. A revisao e a versao do Chromium tambem sao verificadas depois do download.
+O Playwright nao e instalado globalmente: ele fica dentro da pasta privada do JP Tools. A cada instalacao, o npm busca a versao atual e o Playwright instala o Chromium compativel. O JP Tools abre esse navegador em modo de teste e confirma que a versao executada corresponde aos metadados baixados.
 
-Se uma versao desaparecer ou qualquer metadado, URL ou hash mudar, a instalacao para antes de aceitar uma dependencia diferente. As versoes so mudam em uma nova release do JP Tools, depois de validacao.
+Se uma ferramenta independente homologada desaparecer ou tiver metadados, origem ou hashes diferentes, a instalacao para em vez de aceitar outra versao silenciosamente. A lista homologada so muda em uma nova release do JP Tools.
+
+Essa divisao evita congelar dezenas de bibliotecas transitivas do sistema e, ao mesmo tempo, protege as ferramentas abertas menos centralizadas contra uma troca inesperada de versao.
 
 ### Teste Depois De Instalar
 
@@ -433,7 +435,7 @@ scripts/uninstall-windows.ps1   desinstalacao no Windows
 scripts/verify-runtime.js       validacao do Playwright e Chromium
 scripts/verify-macos-dependencies.rb  validacao da arvore Homebrew
 dependencies.lock.json          versoes, origens e hashes homologados
-runtime/package-lock.json       arvore npm exata do Playwright
+runtime/package.json            configuracao do runtime privado do Playwright
 tools/                          comandos do JP Tools
 ```
 
@@ -456,14 +458,13 @@ A pasta `scripts/` e necessaria. Os bootstraps publicos baixam o pacote e chamam
 - A compressao depende dos otimizadores instalados no sistema.
 - Filtros sao intencionalmente rigidos para evitar alteracoes acidentais.
 
-## Novidades Da Versao 1.2.4
+## Novidades Da Versao 1.2.5
 
-- lock central com versoes, origens e hashes homologados;
-- 46 formulas diretas e transitivas do Homebrew verificadas antes e depois da instalacao;
-- `brew pin` aplicado em toda a arvore instalada no Mac;
-- manifestos e hashes do WinGet verificados no Windows;
-- Playwright movido para um runtime privado e reproduzivel com `npm ci`;
-- arvore npm fixada por `package-lock.json` e integridades SHA-512;
-- Chromium validado por revisao, versao e existencia do executavel;
-- instalacao interrompida quando qualquer dependencia nao corresponde ao lock;
-- desinstaladores atualizados para remover o runtime privado e liberar as formulas fixadas.
+- politica hibrida de dependencias, com Node, Playwright, Chromium e WebP atualizados normalmente;
+- FFmpeg, ImageMagick, jpegoptim, pngquant e oxipng mantidos em versoes homologadas;
+- migracao automatica de instalacoes `node@24` que podiam parar antes de criar os comandos;
+- limpeza restrita a residuos orfaos de npm/corepack, preservando outros modulos globais;
+- instalacao Homebrew sem pergunta interativa de confirmacao;
+- remocao dos pins transitivos criados pela versao 1.2.4;
+- validacao real do Chromium depois da instalacao do runtime privado;
+- instaladores, desinstaladores, bootstrap e `jp-help` alinhados com a nova politica.

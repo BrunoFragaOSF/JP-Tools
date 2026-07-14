@@ -25,7 +25,7 @@ if [ -z "$PACKAGE_DIR" ] ||
     [ ! -f "$PACKAGE_DIR/scripts/verify-macos-dependencies.rb" ] ||
     [ ! -f "$PACKAGE_DIR/scripts/verify-runtime.js" ] ||
     [ ! -f "$PACKAGE_DIR/dependencies.lock.json" ] ||
-    [ ! -f "$PACKAGE_DIR/runtime/package-lock.json" ] ||
+    [ ! -f "$PACKAGE_DIR/runtime/package.json" ] ||
     [ ! -d "$PACKAGE_DIR/tools" ]; then
     echo "JP Tools error: o pacote baixado nao possui a estrutura esperada." >&2
     echo "Origem: $ARCHIVE_URL" >&2

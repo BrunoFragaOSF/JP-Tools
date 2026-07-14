@@ -6,9 +6,8 @@ TOOLS_DIR="$SCRIPT_DIR/tools"
 RUNTIME_DIR="$SCRIPT_DIR/runtime"
 LOCK_PATH="$SCRIPT_DIR/dependencies.lock.json"
 BIN_DIR="$HOME/bin"
-NODE_FORMULA="node@24"
 
-for required in "$LOCK_PATH" "$RUNTIME_DIR/package.json" "$RUNTIME_DIR/package-lock.json"; do
+for required in "$LOCK_PATH" "$RUNTIME_DIR/package.json"; do
     if [ ! -f "$required" ]; then
         echo "JP Tools error: arquivo obrigatorio ausente: $required"
         exit 1
@@ -24,6 +23,14 @@ add_path_line() {
     fi
 }
 
+remove_node24_path_line() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    local tmp="$file.jp-tools-node-clean"
+    grep -Ev '^export PATH="[^"]*/opt/node@24/bin:\$PATH"$' "$file" > "$tmp" || true
+    mv "$tmp" "$file"
+}
+
 export PATH="$HOME/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$PATH"
 
 if ! command -v brew >/dev/null 2>&1; then
@@ -37,63 +44,87 @@ elif [ -x /usr/local/bin/brew ]; then
     eval "$(/usr/local/bin/brew shellenv)"
 fi
 
-export HOMEBREW_NO_AUTO_UPDATE=1
 export HOMEBREW_NO_ENV_HINTS=1
 
-echo "Validando versoes, formulas e hashes homologados..."
+echo "Atualizando o catalogo oficial do Homebrew..."
+brew update
+export HOMEBREW_NO_AUTO_UPDATE=1
+
+echo "Validando hashes das ferramentas independentes..."
 /usr/bin/ruby "$SCRIPT_DIR/scripts/verify-macos-dependencies.rb" preflight "$LOCK_PATH"
 
-BREW_FORMULAE=()
+LOCKED_FORMULAE=()
 while IFS= read -r formula; do
-    BREW_FORMULAE+=("$formula")
-done < <(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("macos").fetch("formulae").keys.sort' "$LOCK_PATH")
+    LOCKED_FORMULAE+=("$formula")
+done < <(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).dig("macos", "lockedFormulae").keys.sort' "$LOCK_PATH")
 
-echo "Instalando a arvore Homebrew homologada..."
-brew install "${BREW_FORMULAE[@]}"
+LOCKED_NAMES=" ${LOCKED_FORMULAE[*]} "
+PINNED_NAMES=" $(brew list --pinned | tr '\n' ' ') "
+FORMULAE_TO_UNPIN=()
+while IFS= read -r formula; do
+    if [[ "$LOCKED_NAMES" != *" $formula "* ]] && [[ "$PINNED_NAMES" == *" $formula "* ]]; then
+        FORMULAE_TO_UNPIN+=("$formula")
+    fi
+done < <(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).dig("migration", "unpinFormulae")' "$LOCK_PATH")
+if [ "${#FORMULAE_TO_UNPIN[@]}" -gt 0 ]; then
+    echo "Liberando pins antigos: ${FORMULAE_TO_UNPIN[*]}"
+    brew unpin "${FORMULAE_TO_UNPIN[@]}"
+fi
 
-for formula in "${BREW_FORMULAE[@]}"; do
-    brew pin "$formula"
+brew unpin node@24 2>/dev/null || true
+if brew list --versions node@24 >/dev/null 2>&1; then
+    echo "Migrando node@24 para o Node atualizado normalmente..."
+    brew uninstall --ignore-dependencies node@24 2>/dev/null || true
+fi
+
+remove_node24_path_line "$HOME/.zshrc"
+remove_node24_path_line "$HOME/.bash_profile"
+remove_node24_path_line "$HOME/.bashrc"
+
+BREW_PREFIX="$(brew --prefix)"
+if ! brew list --versions node >/dev/null 2>&1 && [ ! -e "$BREW_PREFIX/bin/node" ]; then
+    rm -rf "$BREW_PREFIX/lib/node_modules/npm" "$BREW_PREFIX/lib/node_modules/corepack"
+    rm -f "$BREW_PREFIX/bin/npm" "$BREW_PREFIX/bin/npx" "$BREW_PREFIX/bin/corepack"
+fi
+
+echo "Instalando dependencias..."
+if ! brew install --yes node webp "${LOCKED_FORMULAE[@]}"; then
+    echo "O Homebrew informou um problema. O ambiente instalado sera validado antes de continuar."
+fi
+
+brew unpin node webp 2>/dev/null || true
+PINNED_NAMES=" $(brew list --pinned | tr '\n' ' ') "
+for formula in "${LOCKED_FORMULAE[@]}"; do
+    if brew list --versions "$formula" >/dev/null 2>&1 && [[ "$PINNED_NAMES" != *" $formula "* ]]; then
+        brew pin "$formula"
+    fi
 done
 
 /usr/bin/ruby "$SCRIPT_DIR/scripts/verify-macos-dependencies.rb" installed "$LOCK_PATH"
 
-NODE_BIN="$(brew --prefix "$NODE_FORMULA")/bin"
-NODE_PATH_LINE="export PATH=\"$NODE_BIN:\$PATH\""
-
 add_path_line "$HOME/.zshrc" 'export PATH="$HOME/bin:$PATH"'
 add_path_line "$HOME/.bash_profile" 'export PATH="$HOME/bin:$PATH"'
 add_path_line "$HOME/.bashrc" 'export PATH="$HOME/bin:$PATH"'
-add_path_line "$HOME/.zshrc" "$NODE_PATH_LINE"
-add_path_line "$HOME/.bash_profile" "$NODE_PATH_LINE"
-add_path_line "$HOME/.bashrc" "$NODE_PATH_LINE"
 
-export PATH="$NODE_BIN:$HOME/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$PATH"
+export PATH="$HOME/bin:$BREW_PREFIX/bin:$BREW_PREFIX/sbin:$PATH"
 hash -r
 
-EXPECTED_NODE_VERSION="$(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).dig("macos", "formulae", "node@24", "version")' "$LOCK_PATH")"
-if [ "$(node --version)" != "v$EXPECTED_NODE_VERSION" ]; then
-    echo "JP Tools error: Node $(node --version) instalado, esperado v$EXPECTED_NODE_VERSION."
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    echo "JP Tools error: Node/npm nao foram encontrados apos a instalacao."
     exit 1
 fi
 
-EXPECTED_FFMPEG_VERSION="$(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).dig("macos", "formulae", "ffmpeg", "version")' "$LOCK_PATH")"
+EXPECTED_FFMPEG_VERSION="$(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).dig("macos", "lockedFormulae", "ffmpeg", "version")' "$LOCK_PATH")"
 if ! ffmpeg -version 2>/dev/null | head -n 1 | grep -Fq "ffmpeg version $EXPECTED_FFMPEG_VERSION"; then
     echo "JP Tools error: o executavel FFmpeg nao corresponde a versao $EXPECTED_FFMPEG_VERSION."
     exit 1
 fi
 
-EXPECTED_IMAGEMAGICK_VERSION="$(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).dig("macos", "formulae", "imagemagick", "version")' "$LOCK_PATH")"
+EXPECTED_IMAGEMAGICK_VERSION="$(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).dig("macos", "lockedFormulae", "imagemagick", "version")' "$LOCK_PATH")"
 if ! magick -version 2>/dev/null | head -n 1 | grep -Fq "ImageMagick $EXPECTED_IMAGEMAGICK_VERSION"; then
     echo "JP Tools error: o executavel ImageMagick nao corresponde a versao $EXPECTED_IMAGEMAGICK_VERSION."
     exit 1
 fi
-
-if ! command -v npm >/dev/null 2>&1; then
-    echo "JP Tools error: npm nao foi encontrado no Node homologado."
-    exit 1
-fi
-
-node "$SCRIPT_DIR/scripts/verify-runtime.js" --lock-only "$RUNTIME_DIR" "$LOCK_PATH"
 
 mkdir -p "$BIN_DIR"
 
@@ -110,8 +141,9 @@ copy_tool jp-compress
 copy_tool jp-help
 copy_tool jp-project-roots.js
 
+rm -rf "$BIN_DIR/node_modules"
+rm -f "$BIN_DIR/package-lock.json"
 cp "$RUNTIME_DIR/package.json" "$BIN_DIR/package.json"
-cp "$RUNTIME_DIR/package-lock.json" "$BIN_DIR/package-lock.json"
 cp "$LOCK_PATH" "$BIN_DIR/jp-tools-dependencies.lock.json"
 
 ln -sf "$BIN_DIR/jp-capture" "$BIN_DIR/jp-capture-remove"
@@ -119,14 +151,15 @@ ln -sf "$BIN_DIR/jp-poster" "$BIN_DIR/jp-poster-remove"
 ln -sf "$BIN_DIR/jp-compress" "$BIN_DIR/jp-compress-original"
 ln -sf "$BIN_DIR/jp-compress" "$BIN_DIR/jp-compress-original-remove"
 
-PLAYWRIGHT_VERSION="$(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).dig("npmRuntime", "playwright", "version")' "$LOCK_PATH")"
-echo "Instalando o runtime npm fechado do JP Tools..."
-npm ci --prefix "$BIN_DIR" --ignore-scripts --no-audit --no-fund
+echo "Instalando as versoes atuais de Playwright e Chromium..."
+npm install --prefix "$BIN_DIR" --save-exact playwright@latest --ignore-scripts --no-audit --no-fund
 node "$BIN_DIR/node_modules/playwright/cli.js" install chromium
-node "$SCRIPT_DIR/scripts/verify-runtime.js" "$BIN_DIR" "$LOCK_PATH"
+node "$SCRIPT_DIR/scripts/verify-runtime.js" "$BIN_DIR"
+
+PLAYWRIGHT_VERSION="$(node -p "require('$BIN_DIR/node_modules/playwright/package.json').version")"
 
 echo ""
 echo "JP Tools instalado. Abra um novo terminal do VSCode ou rode: source ~/.zshrc"
-echo "Todas as dependencias foram conferidas com o lock da versao 1.2.4."
-echo "Node $EXPECTED_NODE_VERSION | Playwright $PLAYWRIGHT_VERSION"
+echo "Node $(node --version) | Playwright $PLAYWRIGHT_VERSION"
+echo "Ferramentas independentes conferidas pelo lock da versao 1.2.5."
 echo "Teste com: jp-help"

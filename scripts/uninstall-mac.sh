@@ -59,12 +59,14 @@ case "$answer" in
             if [ -f "$LOCK_PATH" ]; then
                 while IFS= read -r formula; do
                     BREW_FORMULAE+=("$formula")
-                done < <(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("macos").fetch("formulae").keys.sort' "$LOCK_PATH")
+                done < <(/usr/bin/ruby -rjson -e 'lock = JSON.parse(File.read(ARGV[0])); puts((lock.dig("macos", "lockedFormulae") || {}).keys + (lock.dig("macos", "dynamicFormulae") || []))' "$LOCK_PATH")
             else
-                BREW_FORMULAE=(node@24 ffmpeg jpegoptim pngquant oxipng webp imagemagick)
+                BREW_FORMULAE=(node ffmpeg jpegoptim pngquant oxipng webp imagemagick)
             fi
+            brew unpin node@24 2>/dev/null || true
             brew unpin "${BREW_FORMULAE[@]}" 2>/dev/null || true
             brew uninstall --ignore-dependencies "${BREW_FORMULAE[@]}" 2>/dev/null || true
+            brew uninstall --ignore-dependencies node@24 2>/dev/null || true
             brew uninstall --ignore-dependencies node imageoptim-cli 2>/dev/null || true
             brew uninstall --cask imageoptim 2>/dev/null || true
             brew cleanup 2>/dev/null || true

@@ -12,7 +12,7 @@ unless %w[preflight installed].include?(mode) && lock_path
 end
 
 lock = JSON.parse(File.read(lock_path))
-formulae = lock.fetch("macos").fetch("formulae")
+formulae = lock.fetch("macos").fetch("lockedFormulae")
 names = formulae.keys.sort
 errors = []
 
@@ -86,4 +86,4 @@ unless errors.empty?
 end
 
 message = mode == "preflight" ? "metadados e hashes" : "versoes instaladas e fixadas"
-puts "JP Tools: #{formulae.length} formulas Homebrew validadas (#{message})."
+puts "JP Tools: #{formulae.length} ferramentas independentes validadas (#{message})."

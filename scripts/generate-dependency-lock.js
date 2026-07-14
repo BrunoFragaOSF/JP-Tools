@@ -2,35 +2,16 @@
 
 "use strict";
 
-const { execFileSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const https = require("https");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
-const runtimeLockPath = path.join(root, "runtime", "package-lock.json");
 const outputPath = path.join(root, "dependencies.lock.json");
-const directFormulae = [
-    "node@24",
-    "ffmpeg",
-    "jpegoptim",
-    "pngquant",
-    "oxipng",
-    "webp",
-    "imagemagick"
-];
+const lockedFormulaNames = ["ffmpeg", "imagemagick", "jpegoptim", "oxipng", "pngquant"];
 
-const windowsPackages = {
-    node: {
-        id: "OpenJS.NodeJS.LTS",
-        version: "24.18.0",
-        manifestUrl: "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/o/OpenJS/NodeJS/LTS/24.18.0/OpenJS.NodeJS.LTS.installer.yaml",
-        installerSha256: {
-            x64: "E30CD4CA15529583AFE0EFC978F1AE3AB3A93C2400C222D0752D17900552EBB3",
-            arm64: "F6E4A38E2D1F27D7E106B22C070CA5C2D653ABFC38C6BEA42D6C9358499391E2"
-        }
-    },
+const lockedWindowsPackages = {
     ffmpeg: {
         id: "Gyan.FFmpeg",
         version: "8.1.2",
@@ -75,88 +56,57 @@ async function fetchJson(url) {
     return JSON.parse(await fetchText(url));
 }
 
-function sha256(filePath) {
-    return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
-}
-
 async function main() {
-    if (!fs.existsSync(runtimeLockPath)) {
-        throw new Error("runtime/package-lock.json not found. Run npm install --package-lock-only inside runtime first.");
-    }
+    const previousLock = fs.existsSync(outputPath) ? JSON.parse(fs.readFileSync(outputPath, "utf8")) : {};
+    const legacyPinnedFormulae = previousLock.migration?.unpinFormulae || Object.keys(previousLock.macos?.formulae || {});
+    const lockedFormulae = {};
 
-    const dependencies = execFileSync("brew", [
-        "deps",
-        "--union",
-        "--full-name",
-        ...directFormulae
-    ], {
-        encoding: "utf8",
-        env: { ...process.env, HOMEBREW_NO_ENV_HINTS: "1" }
-    }).trim().split(/\r?\n/).filter(Boolean);
-
-    const names = [...new Set([...directFormulae, ...dependencies])].sort();
-    const formulae = {};
-
-    for (const name of names) {
-        const encodedName = encodeURIComponent(name);
-        const data = await fetchJson(`https://formulae.brew.sh/api/formula/${encodedName}.json`);
+    for (const name of lockedFormulaNames.sort()) {
+        const data = await fetchJson(`https://formulae.brew.sh/api/formula/${encodeURIComponent(name)}.json`);
         const revision = Number(data.revision || 0);
-        const installedVersion = `${data.versions.stable}${revision ? `_${revision}` : ""}`;
-        formulae[name] = {
+        lockedFormulae[name] = {
             version: data.versions.stable,
             revision,
-            installedVersion,
+            installedVersion: `${data.versions.stable}${revision ? `_${revision}` : ""}`,
             formulaSha256: data.ruby_source_checksum.sha256,
             dependencies: data.dependencies,
             bottles: Object.fromEntries(Object.entries(data.bottle.stable.files).map(([tag, bottle]) => [
                 tag,
-                {
-                    url: bottle.url,
-                    sha256: bottle.sha256
-                }
+                { url: bottle.url, sha256: bottle.sha256 }
             ]))
         };
     }
 
-    const runtimeLock = JSON.parse(fs.readFileSync(runtimeLockPath, "utf8"));
-    const playwrightPackage = runtimeLock.packages["node_modules/playwright"];
-    const playwrightCorePackage = runtimeLock.packages["node_modules/playwright-core"];
-
-    for (const packageData of Object.values(windowsPackages)) {
+    for (const packageData of Object.values(lockedWindowsPackages)) {
         const manifest = await fetchText(packageData.manifestUrl);
         packageData.manifestSha256 = crypto.createHash("sha256").update(manifest).digest("hex").toUpperCase();
     }
 
     const lock = {
-        schemaVersion: 1,
-        jpToolsVersion: "1.2.4",
+        schemaVersion: 2,
+        jpToolsVersion: "1.2.5",
         generatedAt: new Date().toISOString(),
-        npmRuntime: {
-            packageLockSha256: sha256(runtimeLockPath),
-            playwright: {
-                version: playwrightPackage.version,
-                integrity: playwrightPackage.integrity
-            },
-            playwrightCore: {
-                version: playwrightCorePackage.version,
-                integrity: playwrightCorePackage.integrity
-            },
-            chromium: {
-                revision: "1228",
-                browserVersion: "149.0.7827.55"
-            }
+        policy: {
+            automaticallyUpdated: ["Node.js", "Playwright", "Chromium", "WebP"],
+            versionLocked: ["FFmpeg", "ImageMagick", "jpegoptim", "pngquant", "oxipng"]
         },
         macos: {
-            directFormulae,
-            formulae
+            dynamicFormulae: ["node", "webp"],
+            lockedFormulae
         },
         windows: {
-            packages: windowsPackages
+            dynamicPackages: {
+                node: { id: "OpenJS.NodeJS.LTS" }
+            },
+            lockedPackages: lockedWindowsPackages
+        },
+        migration: {
+            unpinFormulae: legacyPinnedFormulae.sort()
         }
     };
 
     fs.writeFileSync(outputPath, `${JSON.stringify(lock, null, 2)}\n`);
-    console.log(`Created ${outputPath} with ${names.length} locked Homebrew formulae.`);
+    console.log(`Created ${outputPath} with ${lockedFormulaNames.length} locked third-party formulae.`);
 }
 
 main().catch(error => {

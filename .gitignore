@@ -3,3 +3,4 @@ __MACOSX/
 *.log
 *.tmp
 .env
+node_modules/

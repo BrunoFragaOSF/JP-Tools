@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+LOCK_PATH="$SCRIPT_DIR/dependencies.lock.json"
 BIN_DIR="$HOME/bin"
 COMMANDS=(
     jp-capture
@@ -14,10 +16,16 @@ COMMANDS=(
     jp-project-roots.js
 )
 
+if [ -f "$BIN_DIR/node_modules/playwright/cli.js" ] && command -v node >/dev/null 2>&1; then
+    node "$BIN_DIR/node_modules/playwright/cli.js" uninstall chromium 2>/dev/null || true
+fi
+
 for cmd in "${COMMANDS[@]}"; do
     rm -f "$BIN_DIR/$cmd"
 done
 
+rm -rf "$BIN_DIR/node_modules"
+rm -f "$BIN_DIR/package.json" "$BIN_DIR/package-lock.json" "$BIN_DIR/jp-tools-dependencies.lock.json"
 rmdir "$BIN_DIR" 2>/dev/null || true
 
 remove_path_line() {
@@ -32,10 +40,7 @@ remove_path_line "$HOME/.zshrc"
 remove_path_line "$HOME/.bash_profile"
 remove_path_line "$HOME/.bashrc"
 
-if command -v npx >/dev/null 2>&1; then
-    npx playwright uninstall chromium 2>/dev/null || true
-fi
-
+# Legacy cleanup for installations older than 1.2.4.
 if command -v npm >/dev/null 2>&1; then
     npm uninstall -g playwright 2>/dev/null || true
 fi
@@ -50,8 +55,16 @@ read -r answer
 case "$answer" in
     y|Y|yes|YES|s|S|sim|SIM)
         if command -v brew >/dev/null 2>&1; then
-            brew unpin node@24 ffmpeg@8 jpegoptim pngquant oxipng webp imagemagick@7 2>/dev/null || true
-            brew uninstall --ignore-dependencies node@24 ffmpeg@8 jpegoptim pngquant oxipng webp imagemagick@7 2>/dev/null || true
+            BREW_FORMULAE=()
+            if [ -f "$LOCK_PATH" ]; then
+                while IFS= read -r formula; do
+                    BREW_FORMULAE+=("$formula")
+                done < <(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("macos").fetch("formulae").keys.sort' "$LOCK_PATH")
+            else
+                BREW_FORMULAE=(node@24 ffmpeg jpegoptim pngquant oxipng webp imagemagick)
+            fi
+            brew unpin "${BREW_FORMULAE[@]}" 2>/dev/null || true
+            brew uninstall --ignore-dependencies "${BREW_FORMULAE[@]}" 2>/dev/null || true
             brew uninstall --ignore-dependencies node imageoptim-cli 2>/dev/null || true
             brew uninstall --cask imageoptim 2>/dev/null || true
             brew cleanup 2>/dev/null || true

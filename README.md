@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.3`
+**Versao atual:** `1.2.4`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK e MSK.
 
@@ -84,21 +84,29 @@ O bootstrap baixa o mesmo `JP-Tools.zip`, valida a estrutura e executa o instala
 
 Os caminhos e lançadores internos sao diferentes em cada sistema, mas os comandos usados no terminal sao os mesmos: `jp-capture`, `jp-poster`, `jp-compress`, `jp-help` etc.
 
-### Versoes Homologadas
+### Versoes Homologadas E Verificacao
 
-O instalador nao busca mais qualquer versao nova do Playwright ou qualquer nova linha principal das dependencias. A base homologada para esta release e:
+O instalador usa `dependencies.lock.json` como fonte unica das versoes e hashes permitidos. Ele nao aceita automaticamente uma atualizacao mais recente, mesmo que o Homebrew, npm ou WinGet passe a recomenda-la.
 
 | Dependencia | Mac | Windows |
 | --- | --- | --- |
-| Node.js | linha LTS 24, fixada pelo Homebrew | `24.18.0` |
+| Node.js | `24.18.0` | `24.18.0` |
 | Playwright | `1.61.1` | `1.61.1` |
-| Chromium | versao fornecida pelo Playwright `1.61.1` | versao fornecida pelo Playwright `1.61.1` |
-| FFmpeg | linha 8, fixada pelo Homebrew | `8.1.2` |
-| ImageMagick | linha 7, fixada pelo Homebrew | `7.1.2.27` |
+| Chromium | `149.0.7827.55`, revisao `1228` | `149.0.7827.55`, revisao `1228` |
+| FFmpeg | `8.1.2_1` | `8.1.2` |
+| ImageMagick | `7.1.2-27` | `7.1.2.27` |
+| jpegoptim | `1.5.6` | nao instalado |
+| pngquant | `3.0.3` | nao instalado |
+| oxipng | `10.1.1` | nao instalado |
+| WebP | `1.6.0` | fornecido pelos fallbacks instalados |
 
-No Mac, o Homebrew instala as linhas homologadas e aplica `brew pin` para impedir upgrades automaticos dessas formulas. `jpegoptim`, `pngquant`, `oxipng` e WebP tambem ficam fixados na versao instalada. No Windows, o WinGet recebe os numeros exatos listados acima.
+No Mac, o lock cobre as 46 formulas Homebrew diretas e transitivas usadas por essa arvore. Antes de instalar, o JP Tools confere versao, revisao, dependencias, hash da formula, origem e hash do bottle compativel com aquele Mac. Depois da instalacao, confere as versoes novamente e aplica `brew pin` em toda a arvore.
 
-As versoes so devem mudar em uma nova release do JP Tools, depois de validacao. O instalador tambem confere Node e Playwright antes de concluir.
+No Windows, o instalador confere o hash completo de cada manifesto oficial do WinGet e o hash do instalador homologado para `x64` ou `arm64`. O WinGet faz a segunda verificacao do arquivo ao baixa-lo.
+
+O Playwright nao e mais instalado globalmente. Ele fica dentro da pasta do JP Tools por meio de `npm ci`, usando um `package-lock.json` que fixa versoes, URLs e integridades SHA-512 da arvore npm. A revisao e a versao do Chromium tambem sao verificadas depois do download.
+
+Se uma versao desaparecer ou qualquer metadado, URL ou hash mudar, a instalacao para antes de aceitar uma dependencia diferente. As versoes so mudam em uma nova release do JP Tools, depois de validacao.
 
 ### Teste Depois De Instalar
 
@@ -128,7 +136,7 @@ Windows:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod 'https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/uninstall-windows.ps1' | Invoke-Expression"
 ```
 
-O desinstalador remove o JP Tools e pergunta antes de remover dependencias compartilhadas como Node, FFmpeg, ImageMagick, Playwright e Chromium.
+O desinstalador remove o runtime privado de Playwright/Chromium junto com o JP Tools e pergunta antes de remover dependencias compartilhadas do sistema, como Node, FFmpeg e ImageMagick.
 
 ## Onde Os Comandos Atuam
 
@@ -422,6 +430,10 @@ scripts/install-mac.sh          instalacao interna no Mac
 scripts/install-windows.ps1     instalacao interna no Windows
 scripts/uninstall-mac.sh        desinstalacao no Mac
 scripts/uninstall-windows.ps1   desinstalacao no Windows
+scripts/verify-runtime.js       validacao do Playwright e Chromium
+scripts/verify-macos-dependencies.rb  validacao da arvore Homebrew
+dependencies.lock.json          versoes, origens e hashes homologados
+runtime/package-lock.json       arvore npm exata do Playwright
 tools/                          comandos do JP Tools
 ```
 
@@ -444,13 +456,14 @@ A pasta `scripts/` e necessaria. Os bootstraps publicos baixam o pacote e chamam
 - A compressao depende dos otimizadores instalados no sistema.
 - Filtros sao intencionalmente rigidos para evitar alteracoes acidentais.
 
-## Novidades Da Versao 1.2.3
+## Novidades Da Versao 1.2.4
 
-- Playwright fixado em `1.61.1`, incluindo o Chromium correspondente;
-- Node padronizado na linha LTS 24 nos dois sistemas;
-- FFmpeg mantido na linha 8 e ImageMagick na linha 7;
-- versoes exatas definidas para as dependencias instaladas pelo WinGet;
-- formulas do Homebrew fixadas com `brew pin` depois da instalacao;
-- validacao das versoes de Node e Playwright antes de concluir;
-- ImageOptim e ImageOptim CLI removidos por nao serem usados pelo `jp-compress`;
-- tabela de versoes homologadas adicionada ao README.
+- lock central com versoes, origens e hashes homologados;
+- 46 formulas diretas e transitivas do Homebrew verificadas antes e depois da instalacao;
+- `brew pin` aplicado em toda a arvore instalada no Mac;
+- manifestos e hashes do WinGet verificados no Windows;
+- Playwright movido para um runtime privado e reproduzivel com `npm ci`;
+- arvore npm fixada por `package-lock.json` e integridades SHA-512;
+- Chromium validado por revisao, versao e existencia do executavel;
+- instalacao interrompida quando qualquer dependencia nao corresponde ao lock;
+- desinstaladores atualizados para remover o runtime privado e liberar as formulas fixadas.

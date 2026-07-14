@@ -25,6 +25,9 @@ try {
 
     if (-not $PackageDir -or
         -not (Test-Path (Join-Path $PackageDir.FullName "scripts\install-windows.ps1")) -or
+        -not (Test-Path (Join-Path $PackageDir.FullName "scripts\verify-runtime.js")) -or
+        -not (Test-Path (Join-Path $PackageDir.FullName "dependencies.lock.json")) -or
+        -not (Test-Path (Join-Path $PackageDir.FullName "runtime\package-lock.json")) -or
         -not (Test-Path (Join-Path $PackageDir.FullName "tools"))) {
         throw "O pacote baixado nao possui a estrutura esperada. Origem: $ArchiveUrl"
     }

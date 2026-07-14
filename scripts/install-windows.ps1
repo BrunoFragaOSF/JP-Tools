@@ -2,26 +2,18 @@ $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $ToolsDir = Join-Path $ScriptDir "tools"
+$RuntimeDir = Join-Path $ScriptDir "runtime"
+$LockPath = Join-Path $ScriptDir "dependencies.lock.json"
 $BinDir = Join-Path $env:USERPROFILE "bin"
 $ToolInstallDir = Join-Path $BinDir "jp-tools"
-$NodeVersion = "24.18.0"
-$FfmpegVersion = "8.1.2"
-$ImageMagickVersion = "7.1.2.27"
-$PlaywrightVersion = "1.61.1"
 
-New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-New-Item -ItemType Directory -Force -Path $ToolInstallDir | Out-Null
-
-function Copy-Tool($name) {
-    Copy-Item -Force (Join-Path $ToolsDir $name) (Join-Path $ToolInstallDir "$name.js")
+if (-not (Test-Path $LockPath) -or -not (Test-Path (Join-Path $RuntimeDir "package-lock.json"))) {
+    throw "JP Tools error: dependencies.lock.json ou runtime/package-lock.json ausente."
 }
 
-function Write-Cmd($cmdName, $toolName) {
-    $cmdPath = Join-Path $BinDir "$cmdName.cmd"
-    $toolPath = Join-Path $ToolInstallDir "$toolName.js"
-    $content = "@echo off" + [Environment]::NewLine + "node ""$toolPath"" %*"
-    $content | Set-Content -Encoding ASCII $cmdPath
-}
+$DependencyLock = Get-Content -Raw $LockPath | ConvertFrom-Json
+$WindowsPackages = $DependencyLock.windows.packages
+$PlaywrightVersion = $DependencyLock.npmRuntime.playwright.version
 
 function Add-PathIfExists($pathToAdd) {
     if ($pathToAdd -and (Test-Path $pathToAdd) -and (($env:Path -split ";") -notcontains $pathToAdd)) {
@@ -29,15 +21,12 @@ function Add-PathIfExists($pathToAdd) {
     }
 }
 
-function Refresh-NodePath() {
+function Refresh-ToolPath() {
     Add-PathIfExists (([Environment]::GetFolderPath("ProgramFiles")) + "\nodejs")
     Add-PathIfExists (([Environment]::GetFolderPath("ProgramFilesX86")) + "\nodejs")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Programs\nodejs")
+    Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links")
     Add-PathIfExists (Join-Path $env:APPDATA "npm")
-}
-
-function Has-Command($name) {
-    return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
 
 function Resolve-CommandPath($names) {
@@ -55,12 +44,105 @@ function Invoke-Tool($commandPath, $arguments) {
     }
 }
 
-function Install-WinGetPackage($id, $version) {
-    Write-Host "Instalando $id $version..."
-    & winget install --id $id --version $version -e --accept-source-agreements --accept-package-agreements
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "O WinGet nao instalou $id $version. A versao pode ja estar instalada; o ambiente sera validado em seguida."
+function Get-SystemArchitecture() {
+    if ($env:PROCESSOR_ARCHITEW6432 -eq "ARM64" -or $env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+        return "arm64"
     }
+    return "x64"
+}
+
+function Confirm-WinGetManifest($package, $architecture) {
+    $packageArchitecture = $architecture
+    $expectedHash = $package.installerSha256.$packageArchitecture
+    if (-not $expectedHash -and $architecture -eq "arm64" -and $package.installerSha256.x64) {
+        $packageArchitecture = "x64"
+        $expectedHash = $package.installerSha256.x64
+    }
+    if (-not $expectedHash) {
+        throw "JP Tools error: $($package.id) $($package.version) nao foi homologado para Windows $architecture."
+    }
+
+    Write-Host "Validando manifesto e hash de $($package.id) $($package.version) [$packageArchitecture]..."
+    $manifestPath = Join-Path ([System.IO.Path]::GetTempPath()) ("jp-tools-manifest-" + [guid]::NewGuid().ToString("N") + ".yaml")
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $package.manifestUrl -OutFile $manifestPath
+        $actualManifestHash = (Get-FileHash -Algorithm SHA256 $manifestPath).Hash
+        if ($actualManifestHash -ne $package.manifestSha256) {
+            throw "JP Tools error: o manifesto oficial de $($package.id) foi alterado. Nada foi instalado."
+        }
+        $manifest = Get-Content -Raw $manifestPath
+    } finally {
+        Remove-Item -Force $manifestPath -ErrorAction SilentlyContinue
+    }
+    $versionPattern = "PackageVersion:\s*" + [regex]::Escape($package.version)
+    $hashPattern = "InstallerSha256:\s*" + [regex]::Escape($expectedHash)
+
+    if ($manifest -notmatch $versionPattern -or $manifest -notmatch $hashPattern) {
+        throw "JP Tools error: o manifesto oficial de $($package.id) nao corresponde ao hash homologado. Nada foi instalado."
+    }
+}
+
+function Install-WinGetPackage($package) {
+    Write-Host "Instalando $($package.id) $($package.version)..."
+    & winget install --id $package.id --version $package.version -e --accept-source-agreements --accept-package-agreements
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "O WinGet retornou codigo $LASTEXITCODE. O ambiente sera validado antes de continuar."
+    }
+}
+
+$winget = Get-Command winget -ErrorAction SilentlyContinue
+if (-not $winget) {
+    throw "JP Tools error: WinGet nao encontrado. Ele e necessario para instalar e verificar as versoes homologadas no Windows."
+}
+
+$architecture = Get-SystemArchitecture
+Confirm-WinGetManifest $WindowsPackages.node $architecture
+Confirm-WinGetManifest $WindowsPackages.ffmpeg $architecture
+Confirm-WinGetManifest $WindowsPackages.imagemagick $architecture
+
+Install-WinGetPackage $WindowsPackages.node
+Install-WinGetPackage $WindowsPackages.ffmpeg
+Install-WinGetPackage $WindowsPackages.imagemagick
+
+Refresh-ToolPath
+
+$nodePath = Resolve-CommandPath @("node.exe", "node")
+$npmPath = Resolve-CommandPath @("npm.cmd", "npm")
+$ffmpegPath = Resolve-CommandPath @("ffmpeg.exe", "ffmpeg")
+$magickPath = Resolve-CommandPath @("magick.exe", "magick")
+
+if (-not $nodePath -or -not $npmPath -or -not $ffmpegPath -or -not $magickPath) {
+    throw "JP Tools error: Node, npm, FFmpeg ou ImageMagick nao foi encontrado apos a instalacao. Abra um terminal novo e execute o instalador novamente."
+}
+
+$actualNodeVersion = (& $nodePath "--version").Trim().TrimStart("v")
+if ($actualNodeVersion -ne $WindowsPackages.node.version) {
+    throw "JP Tools error: Node $actualNodeVersion instalado, esperado $($WindowsPackages.node.version)."
+}
+
+$ffmpegHeader = (& $ffmpegPath "-version" | Select-Object -First 1)
+if ($ffmpegHeader -notmatch ("ffmpeg version\s+" + [regex]::Escape($WindowsPackages.ffmpeg.version))) {
+    throw "JP Tools error: FFmpeg instalado nao corresponde a versao $($WindowsPackages.ffmpeg.version)."
+}
+
+$magickHeader = (& $magickPath "-version" | Select-Object -First 1)
+$imageMagickBinaryVersion = $WindowsPackages.imagemagick.version -replace '\.(\d+)$', '-$1'
+if ($magickHeader -notmatch ("ImageMagick\s+" + [regex]::Escape($imageMagickBinaryVersion))) {
+    throw "JP Tools error: ImageMagick instalado nao corresponde a versao $($WindowsPackages.imagemagick.version)."
+}
+
+New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+New-Item -ItemType Directory -Force -Path $ToolInstallDir | Out-Null
+
+function Copy-Tool($name) {
+    Copy-Item -Force (Join-Path $ToolsDir $name) (Join-Path $ToolInstallDir "$name.js")
+}
+
+function Write-Cmd($cmdName, $toolName) {
+    $cmdPath = Join-Path $BinDir "$cmdName.cmd"
+    $toolPath = Join-Path $ToolInstallDir "$toolName.js"
+    $content = "@echo off" + [Environment]::NewLine + "node ""$toolPath"" %*"
+    $content | Set-Content -Encoding ASCII $cmdPath
 }
 
 Copy-Tool "jp-capture"
@@ -68,6 +150,9 @@ Copy-Tool "jp-poster"
 Copy-Tool "jp-compress"
 Copy-Tool "jp-help"
 Copy-Item -Force (Join-Path $ToolsDir "jp-project-roots.js") (Join-Path $ToolInstallDir "jp-project-roots.js")
+Copy-Item -Force (Join-Path $RuntimeDir "package.json") (Join-Path $ToolInstallDir "package.json")
+Copy-Item -Force (Join-Path $RuntimeDir "package-lock.json") (Join-Path $ToolInstallDir "package-lock.json")
+Copy-Item -Force $LockPath (Join-Path $ToolInstallDir "jp-tools-dependencies.lock.json")
 
 Write-Cmd "jp-capture" "jp-capture"
 Write-Cmd "jp-capture-remove" "jp-capture"
@@ -84,43 +169,17 @@ if (($userPath -split ";") -notcontains $BinDir) {
 }
 $env:Path = "$env:Path;$BinDir"
 
-if (Has-Command "winget") {
-    Install-WinGetPackage "OpenJS.NodeJS.LTS" $NodeVersion
-    Install-WinGetPackage "Gyan.FFmpeg" $FfmpegVersion
-    Install-WinGetPackage "ImageMagick.ImageMagick" $ImageMagickVersion
-} else {
-    Write-Host "winget nao encontrado. Instale Node.js, FFmpeg e ImageMagick manualmente."
-}
+Invoke-Tool $nodePath @((Join-Path $ScriptDir "scripts\verify-runtime.js"), "--lock-only", $RuntimeDir, $LockPath)
 
-Refresh-NodePath
-
-$nodePath = Resolve-CommandPath @("node.exe", "node")
-$npmPath = Resolve-CommandPath @("npm.cmd", "npm")
-$npxPath = Resolve-CommandPath @("npx.cmd", "npx")
-
-if (-not $nodePath -or -not $npmPath -or -not $npxPath) {
-    Write-Host "Node/npm/npx nao foram encontrados apos a instalacao. Abra um novo terminal e rode novamente o comando de instalacao do README."
-    exit 1
-}
-
-$actualNodeVersion = (& $nodePath "--version").Trim().TrimStart("v")
-if ($actualNodeVersion -ne $NodeVersion) {
-    throw "JP Tools requer Node $NodeVersion no Windows. Versao encontrada: $actualNodeVersion."
-}
-
-Write-Host "Instalando Playwright $PlaywrightVersion e o Chromium correspondente..."
-Invoke-Tool $npmPath @("install", "-g", "playwright@$PlaywrightVersion")
-Invoke-Tool $npxPath @("--yes", "playwright@$PlaywrightVersion", "install", "chromium")
-
-$globalRoot = (& $npmPath "root" "-g").Trim()
-& $nodePath -e "var pkg=require(process.argv[1] + '/playwright/package.json'); process.exit(pkg.version === process.argv[2] ? 0 : 1)" $globalRoot $PlaywrightVersion
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Playwright $PlaywrightVersion nao ficou acessivel para o Node."
-    exit 1
-}
+Write-Host "Instalando o runtime npm fechado do JP Tools..."
+Invoke-Tool $npmPath @("ci", "--prefix", $ToolInstallDir, "--ignore-scripts", "--no-audit", "--no-fund")
+$playwrightCli = Join-Path $ToolInstallDir "node_modules\playwright\cli.js"
+Invoke-Tool $nodePath @($playwrightCli, "install", "chromium")
+Invoke-Tool $nodePath @((Join-Path $ScriptDir "scripts\verify-runtime.js"), $ToolInstallDir, $LockPath)
 
 Write-Host ""
 Write-Host "JP Tools instalado. Abra um novo terminal do VSCode."
-Write-Host "Dependencias homologadas: Node $NodeVersion, Playwright $PlaywrightVersion, FFmpeg $FfmpegVersion e ImageMagick $ImageMagickVersion."
+Write-Host "Todas as dependencias foram conferidas com o lock da versao 1.2.4."
+Write-Host "Node $actualNodeVersion | Playwright $PlaywrightVersion | FFmpeg $($WindowsPackages.ffmpeg.version) | ImageMagick $($WindowsPackages.imagemagick.version)"
 Write-Host "Teste com: jp-help"
-Write-Host "No Windows, jp-compress usa ImageMagick/FFmpeg como fallback. Para compressao mais forte de PNG/JPG, jpegoptim/pngquant/oxipng/cwebp via Scoop/Chocolatey ainda podem melhorar o resultado."
+Write-Host "No Windows, jp-compress usa ImageMagick e FFmpeg como fallback para os otimizadores disponiveis no Mac."

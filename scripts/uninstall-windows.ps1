@@ -13,6 +13,12 @@ $Commands = @(
     "jp-help.cmd"
 )
 
+$playwrightCli = Join-Path $ToolInstallDir "node_modules\playwright\cli.js"
+$node = Get-Command node.exe -ErrorAction SilentlyContinue
+if ((Test-Path $playwrightCli) -and $node) {
+    & $node.Source $playwrightCli uninstall chromium
+}
+
 foreach ($cmd in $Commands) {
     Remove-Item -Force (Join-Path $BinDir $cmd) -ErrorAction SilentlyContinue
 }
@@ -33,6 +39,7 @@ if ($userPath) {
 $playwrightCache = Join-Path $env:LOCALAPPDATA "ms-playwright"
 Remove-Item -Recurse -Force $playwrightCache -ErrorAction SilentlyContinue
 
+# Legacy cleanup for installations older than 1.2.4.
 $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
 if ($npm) {
     & $npm.Source uninstall -g playwright

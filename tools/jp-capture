@@ -15,7 +15,7 @@ function loadPlaywright() {
             return require(path.join(globalRoot, "playwright")).chromium;
         } catch (globalError) {
             console.error("Playwright is not installed.");
-            console.error("Run: npm install -g playwright && npx playwright install chromium");
+            console.error("Reinstall JP Tools using the official command in the README.");
             process.exit(1);
         }
     }

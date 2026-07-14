@@ -20,7 +20,13 @@ echo "JP Tools: extraindo o pacote..."
 
 PACKAGE_DIR="$(find "$TEMP_DIR/package" -mindepth 1 -maxdepth 1 -type d -name 'JP-Tools-*' -print | head -n 1)"
 
-if [ -z "$PACKAGE_DIR" ] || [ ! -f "$PACKAGE_DIR/scripts/install-mac.sh" ] || [ ! -d "$PACKAGE_DIR/tools" ]; then
+if [ -z "$PACKAGE_DIR" ] ||
+    [ ! -f "$PACKAGE_DIR/scripts/install-mac.sh" ] ||
+    [ ! -f "$PACKAGE_DIR/scripts/verify-macos-dependencies.rb" ] ||
+    [ ! -f "$PACKAGE_DIR/scripts/verify-runtime.js" ] ||
+    [ ! -f "$PACKAGE_DIR/dependencies.lock.json" ] ||
+    [ ! -f "$PACKAGE_DIR/runtime/package-lock.json" ] ||
+    [ ! -d "$PACKAGE_DIR/tools" ]; then
     echo "JP Tools error: o pacote baixado nao possui a estrutura esperada." >&2
     echo "Origem: $ARCHIVE_URL" >&2
     exit 1

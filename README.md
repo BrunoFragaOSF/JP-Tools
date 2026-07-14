@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.1`
+**Versao atual:** `1.2.2`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK e MSK.
 
@@ -57,23 +57,33 @@ Os comandos sem filtro sao globais dentro do escopo detectado. Isso significa qu
 
 ## Instalacao Completa
 
-### Download
+### Download Manual
+
+Use este caminho para Windows ou como alternativa manual no Mac:
 
 1. Abra a aba **Releases** deste repositorio.
 2. Entre na release mais recente.
-3. Baixe `JP-Tools-v1.2.1.zip`.
+3. Baixe `JP-Tools-v1.2.2.zip`.
 4. Descompacte a pasta.
 5. Rode o instalador do seu sistema.
 
 ### Mac
 
-Clique duas vezes em:
+O metodo recomendado evita o bloqueio do Gatekeeper em arquivos baixados pelo navegador. Abra o Terminal, cole o comando completo abaixo e pressione Enter:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/bootstrap-mac.sh)"
+```
+
+O bootstrap baixa `JP-Tools-mac.zip` da release mais recente, valida a estrutura e executa o instalador pelo Terminal. O mesmo comando continua valido nas proximas versoes.
+
+Como alternativa, baixe o ZIP e tente abrir:
 
 ```text
 INSTALL-MAC.command
 ```
 
-Se o macOS bloquear o arquivo, abra o Terminal dentro da pasta descompactada e rode:
+Como esse arquivo nao possui assinatura Developer ID, o macOS pode bloquea-lo quando ele e aberto pelo Finder. Nesse caso, use o comando recomendado acima ou abra o Terminal dentro da pasta descompactada e rode:
 
 ```bash
 xattr -dr com.apple.quarantine .
@@ -406,6 +416,7 @@ INSTALL-WINDOWS.bat          instalador para Windows
 UNINSTALL-MAC.command        desinstalador para Mac
 UNINSTALL-WINDOWS.bat        desinstalador para Windows
 scripts/                     logica interna de instalacao/desinstalacao
+scripts/bootstrap-mac.sh     instalacao pelo GitHub sem abrir arquivo pelo Finder
 tools/                       comandos do JP Tools
 ```
 
@@ -428,11 +439,11 @@ A pasta `scripts/` e necessaria. Os arquivos da raiz sao os inicializadores amig
 - A compressao depende dos otimizadores instalados no sistema.
 - Filtros sao intencionalmente rigidos para evitar alteracoes acidentais.
 
-## Novidades Da Versao 1.2.1
+## Novidades Da Versao 1.2.2
 
-- configuracao global de poster seguida por excecoes, como `jp-poster 20 --and 5 F1`;
-- varias excecoes de pasta, versao ou HTML no mesmo comando;
-- prioridade para o ultimo filtro compativel, permitindo que um HTML especifico substitua a configuracao geral da pasta;
-- preservacao do comportamento existente para comandos que comecam diretamente por um filtro;
-- validacao de `--and` incompleto e de filtros de excecao inexistentes;
-- `jp-help` e README atualizados com exemplos dinamicos e explicacao de conflitos entre filtros.
+- instalacao recomendada no Mac por um unico comando executado no Terminal;
+- download automatico de `JP-Tools-mac.zip` a partir da release mais recente;
+- validacao da estrutura do pacote antes de iniciar o instalador;
+- remocao da quarentena somente depois que o bootstrap ja esta em execucao;
+- comando de instalacao permanente, sem numero de versao na URL;
+- ZIP e `INSTALL-MAC.command` preservados como alternativas manuais.

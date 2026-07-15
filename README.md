@@ -2,25 +2,23 @@
 
 **Versao atual:** `1.2.4`
 
-Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK e MSK.
+Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente projetos DSK e MSK.
 
-O projeto e publico para que qualquer pessoa possa ler os scripts antes de instalar. Nao existe servidor proprio, telemetria ou envio dos arquivos do banner para o JP Tools.
+O codigo e publico, roda localmente e nao envia arquivos dos projetos para servidores do JP Tools. Na maior parte do trabalho, os comandos usados serao `jp-capture`, `jp-poster` e `jp-compress`.
 
-## Para Que Serve
+## O Que Faz
 
-O JP Tools cobre o fluxo mais comum de preparacao e entrega de banners:
-
-- gera `banner/backup.jpg` das versoes;
+- gera `banner/backup.jpg` na resolucao correta;
 - gera posters a partir dos videos usados nos paineis;
-- comprime imagens e preserva os arquivos originais;
-- remove capturas e posters antigos;
-- restaura imagens anteriores a compressao;
-- valida filtros e explica erros antes de alterar arquivos;
-- reconhece projetos abertos como workspace multi-root no VS Code.
+- comprime imagens individualmente ou em lote;
+- preserva e restaura os arquivos anteriores a compressao;
+- remove capturas, posters e backups antigos;
+- reconhece projetos DSK, MSK e workspaces multi-root do VS Code;
+- valida filtros antes de alterar arquivos e explica erros encontrados.
 
-## Uso Mais Simples
+## Uso Mais Comum
 
-Na maior parte do trabalho, use apenas estes tres comandos:
+Abra o terminal dentro da pasta do projeto e execute:
 
 ```bash
 jp-capture
@@ -32,139 +30,50 @@ jp-compress
 
 Sem argumentos, encontra todas as versoes no escopo atual e gera `banner/backup.jpg`.
 
-- DSK: captura em `1920x1200`.
-- MSK: captura em `300x600`, incluindo as barras do preview.
+- DSK: `1920x1200`.
+- MSK: `300x600`, incluindo as barras do preview.
 - Espera padrao: `3` segundos.
-- Em um workspace com DSK e MSK, detecta o formato de cada `index.html` separadamente.
+- Detecta DSK ou MSK separadamente para cada versao.
 
 ### `jp-poster`
 
-Sem argumentos, encontra os videos locais e as referencias de video do projeto e gera `poster.jpg`, `poster2.jpg` etc. dentro de `banner/assets`.
+Sem argumentos, encontra os videos locais e as referencias em HTML, JS ou JSON.
 
 - Formato padrao: `16x9`.
 - Tempo padrao: segundo `1`.
-- Cada fonte de video unica recebe seu poster no diretorio correto.
+- Saida: `banner/assets/poster.jpg`, `poster2.jpg` etc.
+- Cada fonte de video unica recebe seu proprio poster.
 
 ### `jp-compress`
 
-Sem argumentos, comprime imagens em `banner/assets` e tambem `banner/backup.jpg`.
+Sem argumentos, comprime JPG, PNG e WebP dentro de `banner/assets`, alem de `banner/backup.jpg`.
 
 - Qualidade padrao: `80`.
-- So substitui uma imagem quando o resultado comprimido fica menor.
-- Salva o original em `.jp-compress-original` antes de substituir.
-
-Os comandos sem filtro sao globais dentro do escopo detectado. Isso significa que eles processam todas as versoes validas abaixo da pasta atual ou todas as raizes de projeto detectadas no workspace.
-
-## Instalacao Completa
-
-### Mac
-
-Abra o Terminal, cole o comando completo abaixo e pressione Enter:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/bootstrap-mac.sh)"
-```
-
-O bootstrap baixa `JP-Tools.zip` da release mais recente, valida a estrutura e executa o instalador pelo Terminal. Nao e necessario baixar, descompactar ou abrir arquivos pelo Finder.
-
-### Windows
-
-Abra o PowerShell, cole o comando completo abaixo e pressione Enter:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod 'https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/bootstrap-windows.ps1' | Invoke-Expression"
-```
-
-O bootstrap baixa o mesmo `JP-Tools.zip`, valida a estrutura e executa o instalador PowerShell. Nao e necessario baixar ou abrir um `.bat`.
-
-### Onde Fica Instalado
-
-- Mac: `~/bin`.
-- Windows: `%USERPROFILE%\bin`.
-
-Os caminhos e lançadores internos sao diferentes em cada sistema, mas os comandos usados no terminal sao os mesmos: `jp-capture`, `jp-poster`, `jp-compress`, `jp-help` etc.
-
-### Politica De Atualizacao E Verificacao
-
-O JP Tools usa uma politica hibrida. Componentes de plataforma amplamente mantidos sao atualizados normalmente ao executar o instalador. Ferramentas independentes ficam em versoes homologadas, com origem e hashes registrados em `dependencies.lock.json`.
-
-| Dependencia | Mac | Windows |
-| --- | --- | --- |
-| Node.js | versao atual do Homebrew | LTS atual do WinGet |
-| Playwright | versao atual do npm | versao atual do npm |
-| Chromium | versao compativel atual do Playwright | versao compativel atual do Playwright |
-| FFmpeg | `8.1.2_1` | `8.1.2` |
-| ImageMagick | `7.1.2-27` | `7.1.2.27` |
-| jpegoptim | `1.5.6` | nao instalado |
-| pngquant | `3.0.3` | nao instalado |
-| oxipng | `10.1.1` | nao instalado |
-| WebP | versao atual do Homebrew | fornecido pelos fallbacks instalados |
-
-No Mac, FFmpeg, ImageMagick, jpegoptim, pngquant e oxipng sao verificados por versao, revisao, dependencias, hash da formula, origem e hash do bottle compativel. Depois da instalacao, somente essas cinco ferramentas ficam com `brew pin`. Node e WebP continuam livres para receber atualizacoes normais.
-
-No Windows, FFmpeg e ImageMagick sao instalados nas versoes homologadas. O instalador confere o hash completo dos manifestos oficiais do WinGet e o hash do instalador para `x64` ou `arm64`. Node usa o LTS atual disponibilizado pelo WinGet.
-
-O Playwright nao e instalado globalmente: ele fica dentro da pasta privada do JP Tools. A cada instalacao, o npm busca a versao atual e o Playwright instala o Chromium compativel. O JP Tools abre esse navegador em modo de teste e confirma que a versao executada corresponde aos metadados baixados.
-
-Se uma ferramenta independente homologada desaparecer ou tiver metadados, origem ou hashes diferentes, a instalacao para em vez de aceitar outra versao silenciosamente. A lista homologada so muda em uma nova release do JP Tools.
-
-Essa divisao evita congelar dezenas de bibliotecas transitivas do sistema e, ao mesmo tempo, protege as ferramentas abertas menos centralizadas contra uma troca inesperada de versao.
-
-### Teste Depois De Instalar
-
-Abra um terminal novo dentro de um projeto e rode:
-
-```bash
-jp-help
-```
-
-O help detecta pastas, versoes, HTMLs de video e imagens reais do projeto para montar exemplos apropriados ao trabalho atual.
-
-### Atualizacao
-
-Rode novamente o comando de instalacao do seu sistema. Ele baixa a release mais recente e substitui os comandos antigos.
-
-### Desinstalacao
-
-Mac:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/uninstall-mac.sh)"
-```
-
-Windows:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod 'https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/uninstall-windows.ps1' | Invoke-Expression"
-```
-
-O desinstalador remove o runtime privado de Playwright/Chromium junto com o JP Tools e pergunta antes de remover dependencias compartilhadas do sistema, como Node, FFmpeg e ImageMagick.
+- So substitui uma imagem quando o resultado fica menor.
+- Antes de substituir, salva o original em `.jp-compress-original` na pasta da versao.
+- O backup preserva a estrutura original, como `.jp-compress-original/banner/assets/CTA.png`.
 
 ## Onde Os Comandos Atuam
 
-Rode o JP Tools dentro da pasta geral do projeto, DSK, MSK, idioma ou versao.
-
-Exemplo:
+O JP Tools pode ser executado na pasta geral do projeto, em `DSK`, `MSK`, em um idioma ou diretamente em uma versao.
 
 ```text
 Projeto/
   DSK/
     Baseball/index.html
-    Baseball/banner/assets/
     F1/index.html
-    F1/banner/assets/
   MSK/
     Baseball/index.html
-    Baseball/banner/assets/
+    F1/index.html
 ```
 
-Sem filtro, o comando varre tudo abaixo da pasta atual.
+Sem filtro, o comando processa todas as versoes validas abaixo da pasta atual.
 
-Quando `DSK` e `MSK` sao adicionados separadamente ao mesmo workspace multi-root do VS Code, o JP Tools reconhece as duas raizes. O comando pode ser executado no terminal de uma delas e processa as duas sem exigir que a pasta pai esteja aberta no Explorer.
+Se `DSK` e `MSK` estiverem adicionados separadamente ao mesmo workspace multi-root do VS Code, o JP Tools reconhece as duas raizes. O comando pode ser executado no terminal de qualquer uma delas.
 
-Somente raizes com estrutura valida de projeto, incluindo `index.html` e `banner`, entram na varredura.
+Somente pastas com uma estrutura valida de projeto, incluindo `index.html` e `banner`, entram na varredura.
 
-## Como Ler Um Comando
+## Filtros E Ajustes
 
 A ordem e sempre:
 
@@ -178,296 +87,174 @@ Exemplo:
 jp-poster 16x9 5 DSK/F1
 ```
 
-- `jp-poster`: comando.
-- `16x9`: ajuste de formato.
-- `5`: ajuste de tempo.
-- `DSK/F1`: filtro de pasta/versao.
+- `jp-poster`: comando;
+- `16x9`: formato;
+- `5`: tempo;
+- `DSK/F1`: filtro de pasta.
 
-As regras principais sao:
+Regras importantes:
 
-- pastas e versoes usam `/` para representar niveis: `EN/V1`, nao `EN V1`;
-- filtros sao case-sensitive: `text-1.png` e diferente de `TEXT-1.png`;
+- use `/` para niveis de pasta: `EN/V1`, nao `EN V1`;
+- filtros diferenciam maiusculas e minusculas;
 - `--and` adiciona outro grupo;
 - `--not` exclui o filtro seguinte;
-- `--and` e `--not` nunca podem ficar sem um filtro depois deles;
-- imagens devem usar nome completo, extensao e case exato;
-- no `jp-poster` e `jp-compress`, ajustes depois de `--and` valem apenas para aquele grupo.
+- operadores nunca podem ficar sem um valor depois deles;
+- filtros de imagem exigem nome completo e extensao, como `CTA.png`;
+- ajustes escritos depois de `--and` valem para aquele grupo.
 
-No `jp-poster`, existe uma forma especial de combinar um padrao global com excecoes:
-
-```bash
-jp-poster 20 --and 5 F1
-```
-
-Como nao existe filtro antes do primeiro `--and`, o segundo `20` vale globalmente. A pasta `F1` usa o segundo `5`. O `--and` continua exigindo ajustes/filtro depois dele.
-
-As excecoes podem ser encadeadas:
+Exemplos:
 
 ```bash
-jp-poster 20 --and 5 F1 --and 15 expanded_video.html
-```
-
-- o restante do projeto usa o segundo `20`;
-- `F1` usa o segundo `5`;
-- os paineis `expanded_video.html` usam o segundo `15`;
-- quando dois filtros combinam com o mesmo video, o ultimo grupo escrito tem prioridade.
-
-## Filtro Por HTML No `jp-poster`
-
-O HTML pode ser usado diretamente como filtro, sem informar a pasta da versao.
-
-```bash
-jp-poster 5 expanded_video.html
-```
-
-Esse comando procura todo arquivo chamado exatamente `expanded_video.html` no escopo detectado. Se ele existir em `Baseball`, `F1` e `FIFA`, os tres videos recebem poster no segundo `5`.
-
-Exemplo de resultado:
-
-```text
-HTML filter expanded_video.html: 3 panel(s) with video.
-created DSK/Baseball/banner/assets/poster.jpg (...)
-created DSK/F1/banner/assets/poster.jpg (...)
-created DSK/FIFA/banner/assets/poster.jpg (...)
-```
-
-### Tempos Diferentes Por HTML
-
-```bash
-jp-poster 5 expanded_video.html --and 20 left.html
-```
-
-- todos os `expanded_video.html` usam o segundo `5`;
-- todos os `left.html` usam o segundo `20`;
-- se o segundo grupo nao informar tempo, ele herda o tempo padrao do inicio do comando.
-
-### Somente Uma Versao
-
-Use o caminho completo quando quiser limitar o filtro:
-
-```bash
-jp-poster 5 DSK/F1/banner/expanded_video.html
-```
-
-Assim apenas o painel de F1 recebe o poster.
-
-### HTML Sem Video
-
-O HTML precisa conter uma referencia direta para `.mp4`, `.webm`, `.mov` ou `.m4v`, por exemplo:
-
-```html
-<video src="assets/video.mp4"></video>
-<div jp-createvideo-src="https://video-content.gumgum.com/video.mp4"></div>
-```
-
-Se `top.html` existir mas for apenas visual e nao tiver video, ele nao gera poster. A partir da versao `1.2.0`, o comando informa isso claramente:
-
-```text
-HTML filter top.html: matched 3 file(s), but none contains a direct video reference. No poster will be created for this group.
-```
-
-## Comandos
-
-### `jp-capture`
-
-Gera `banner/backup.jpg`.
-
-```bash
-jp-capture
-jp-capture msk 3 EN/V1
-jp-capture dsk 10 DSK/F1
-jp-capture DSK/Baseball --and MSK/Baseball
+jp-capture EN/V1 --and FR/V2
 jp-capture EN/V1 --not EN/V2
-```
-
-Parametros:
-
-- `msk` ou `dsk`: forca o formato;
-- numero: espera em segundos antes da captura;
-- filtro: pasta ou versao que deve ser processada.
-
-Variaveis avancadas:
-
-```bash
-JP_CAPTURE_WAIT=5000 jp-capture msk
-JP_CAPTURE_QUALITY=90 jp-capture dsk
-```
-
-### `jp-capture-remove`
-
-Remove `banner/backup.jpg`.
-
-```bash
-jp-capture-remove
-jp-capture-remove EN/V1
-jp-capture-remove EN/V1 --and FR/V2
-```
-
-### `jp-poster`
-
-Gera posters para videos locais ou referencias encontradas em HTML, JS e JSON.
-
-```bash
-jp-poster
-jp-poster 16x9 2 EN/V1
 jp-poster 5 expanded_video.html
 jp-poster 5 expanded_video.html --and 20 left.html
-jp-poster 5 DSK/F1/banner/expanded_video.html
-jp-poster 9x16 5 EN/V1 --and 2 NL/V2
-jp-poster 20 --and 5 F1
-jp-poster 20 --and 5 F1 --and 15 expanded_video.html
-```
-
-Formatos aceitos:
-
-- `16x9`
-- `9x16`
-- `1x1`
-- `square`
-- `msk`
-- `dsk`
-- `WxH`, como `300x600`
-
-Variaveis avancadas:
-
-```bash
-JP_POSTER_QUALITY=90 jp-poster 16x9 2
-JP_POSTER_FIT=contain jp-poster 9x16 2
-```
-
-### `jp-poster-remove`
-
-Remove `poster.jpg`, `poster2.jpg` etc. dentro de `banner/assets`.
-
-```bash
-jp-poster-remove
-jp-poster-remove EN/V1
-jp-poster-remove EN/V1 --and NL/V2
-```
-
-### `jp-compress`
-
-Comprime imagens e salva os originais antes de substituir.
-
-```bash
-jp-compress
-jp-compress 80
-jp-compress 65 EN/V1
-jp-compress 80 EN/V1 CTA.png
 jp-compress 80 EN/V1 CTA.png --and 70 NL/V2 chat-2.png
 ```
 
-Qualidade:
+No `jp-poster`, um ajuste global pode receber excecoes:
 
-- padrao: `80`
-- minimo: `0`
-- maximo: `100`
+```bash
+jp-poster 20 --and 5 F1 --and 15 expanded_video.html
+```
 
-### `jp-compress-original`
+Nesse exemplo, o projeto usa `20` segundos, `F1` usa `5` segundos e os paineis `expanded_video.html` usam `15` segundos. Quando mais de um grupo corresponde ao mesmo video, o ultimo grupo escrito tem prioridade.
 
-Restaura imagens salvas em `.jp-compress-original`. O backup restaurado e removido depois da restauracao.
+Um nome HTML sem caminho, como `expanded_video.html`, encontra todos os paineis com esse nome. Para limitar a uma versao, use o caminho completo:
+
+```bash
+jp-poster 5 DSK/F1/banner/expanded_video.html
+```
+
+O HTML precisa conter uma referencia direta para `.mp4`, `.webm`, `.mov` ou `.m4v`. Arquivos sem video sao informados e ignorados.
+
+## Comandos Disponiveis
+
+| Comando | Funcao |
+| --- | --- |
+| `jp-capture` | Gera `banner/backup.jpg`. |
+| `jp-capture-remove` | Remove `banner/backup.jpg`. |
+| `jp-poster` | Gera posters dos videos. |
+| `jp-poster-remove` | Remove `poster.jpg`, `poster2.jpg` etc. |
+| `jp-compress` | Comprime imagens e guarda os originais. |
+| `jp-compress-original` | Restaura os originais e remove os backups restaurados. |
+| `jp-compress-original-remove` | Remove pastas `.jp-compress-original` restantes. |
+| `jp-help` | Mostra ajuda, regras e exemplos baseados no projeto atual. |
+
+Exemplos de restauracao e limpeza:
 
 ```bash
 jp-compress-original
-jp-compress-original EN/V1
 jp-compress-original EN/V1 --not CTA.png
-jp-compress-original FR/V1 --not Logo.png --and NL/V2 --not Headline.png
+jp-compress-original-remove EN/V1 --and FR/V2
+jp-poster-remove EN/V1
+jp-capture-remove EN/V1
 ```
 
-### `jp-compress-original-remove`
+Use `jp-help` para consultar formatos, variaveis avancadas e exemplos dinamicos com nomes encontrados no projeto atual.
 
-Remove pastas `.jp-compress-original` que nao serao mais usadas.
+## Instalacao
+
+### Mac
+
+Abra o Terminal, cole o comando completo e pressione Enter:
 
 ```bash
-jp-compress-original-remove
-jp-compress-original-remove EN/V1
-jp-compress-original-remove EN/V1 --and FR/V2
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/bootstrap-mac.sh)"
 ```
 
-### `jp-help`
+### Windows
 
-Mostra ajuda colorida, exemplos globais, filtros, comandos avancados e exemplos dinamicos baseados no projeto atual.
+Abra o PowerShell, cole o comando completo e pressione Enter:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod 'https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/bootstrap-windows.ps1' | Invoke-Expression"
+```
+
+O instalador baixa o pacote da release mais recente, instala ou valida as dependencias, configura o runtime privado do Playwright/Chromium e adiciona os comandos ao `PATH`.
+
+- Mac: comandos instalados em `~/bin`.
+- Windows: comandos instalados em `%USERPROFILE%\bin`.
+
+No Windows, o instalador recarrega o `PATH` depois do WinGet e detecta as pastas do ImageMagick sem exigir que o PowerShell seja fechado durante a primeira instalacao.
+
+Depois de instalar, abra um terminal novo e execute:
 
 ```bash
 jp-help
 ```
 
+## Atualizacao
+
+Execute novamente o comando de instalacao do seu sistema. O bootstrap baixa a release mais recente e substitui os comandos antigos.
+
+## Desinstalacao
+
+### Mac
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/uninstall-mac.sh)"
+```
+
+### Windows
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod 'https://raw.githubusercontent.com/BrunoFragaOSF/JP-Tools/main/scripts/uninstall-windows.ps1' | Invoke-Expression"
+```
+
+O desinstalador remove os comandos e o runtime privado do JP Tools. Antes de remover dependencias compartilhadas, como Node, FFmpeg e ImageMagick, ele pede confirmacao porque outros projetos podem utiliza-las.
+
 ## Erros E Protecoes
 
-Os comandos tentam interromper a execucao antes de alterar arquivos quando encontram:
+Os comandos interrompem a execucao antes de alterar arquivos quando encontram problemas como:
 
-- filtro inexistente;
-- caminho com `/` ausente;
-- diferenca de maiusculas/minusculas;
+- filtro ou pasta inexistente;
+- caminho de pasta escrito sem `/`;
+- diferenca de maiusculas e minusculas;
 - imagem sem extensao ou com nome incorreto;
 - `--and` ou `--not` sem valor;
 - HTML sem referencia direta de video;
-- pasta sem estrutura valida de banner.
+- pasta sem uma estrutura valida de banner;
+- dependencia ou executavel nao encontrado;
+- versao ou hash de ferramenta independente diferente do homologado.
 
-As mensagens mostram o motivo e, quando possivel, sugerem nomes reais encontrados no projeto.
+As mensagens informam o motivo e, quando possivel, sugerem pastas, HTMLs ou imagens reais encontrados no projeto.
+
+Outras protecoes:
+
+- `jp-compress` so substitui uma imagem se o arquivo novo for menor;
+- os originais sao preservados antes da compressao;
+- filtros sao validados antes do processamento;
+- o Chromium e iniciado depois da instalacao para validar o runtime;
+- nao existe telemetria nem upload automatico dos projetos.
 
 ## Dependencias
 
-Os instaladores tentam instalar ou configurar:
+O JP Tools utiliza dependencias conhecidas e obtidas por gerenciadores oficiais.
 
-- Node.js
-- Playwright
-- Chromium
-- FFmpeg
-- ImageMagick
-- `jpegoptim`
-- `pngquant`
-- `oxipng`
-- ferramentas WebP
+| Dependencia | Para que serve | Origem | Politica |
+| --- | --- | --- | --- |
+| Node.js | Executa os comandos e a logica do JP Tools. | Homebrew no Mac e WinGet no Windows | Atualizacao normal. |
+| Playwright | Automatiza o navegador para capturas, posters e validacoes. | npm | Atualizacao normal, instalado no runtime privado. |
+| Chromium | Renderiza banners e midias usados pelo `jp-capture` e pelo `jp-poster`. | Distribuicao do Playwright | Versao compativel com o Playwright instalado. |
+| WebP | Le, comprime e converte imagens WebP. | Homebrew ou suporte dos fallbacks | Atualizacao normal. |
+| FFmpeg | Extrai frames de videos para posters e funciona como fallback de imagem. | Homebrew ou WinGet | Versao e hashes homologados. |
+| ImageMagick | Comprime e converte imagens quando nao existe um otimizador especifico. | Homebrew ou WinGet | Versao e hashes homologados. |
+| jpegoptim | Otimiza imagens JPEG no Mac. | Homebrew no Mac | Versao e hashes homologados. |
+| pngquant | Reduz cores e peso de imagens PNG no Mac. | Homebrew no Mac | Versao e hashes homologados. |
+| oxipng | Faz uma otimizacao adicional sem perda em imagens PNG no Mac. | Homebrew no Mac | Versao e hashes homologados. |
 
-No Windows, algumas otimizacoes dependem do que estiver disponivel no sistema. O `jp-compress` usa ImageMagick ou FFmpeg como fallback quando necessario.
+No Mac, somente FFmpeg, ImageMagick, jpegoptim, pngquant e oxipng ficam fixados com `brew pin`. No Windows, FFmpeg e ImageMagick usam versoes homologadas e manifestos oficiais do WinGet.
 
-## Estrutura Do Pacote
+O instalador compara versoes, origens e hashes registrados em `dependencies.lock.json`. Se uma ferramenta independente nao corresponder ao lock, a instalacao para em vez de aceitar outro arquivo silenciosamente.
 
-```text
-README.md                       documentacao completa
-scripts/bootstrap-mac.sh        download e instalacao no Mac
-scripts/bootstrap-windows.ps1   download e instalacao no Windows
-scripts/install-mac.sh          instalacao interna no Mac
-scripts/install-windows.ps1     instalacao interna no Windows
-scripts/uninstall-mac.sh        desinstalacao no Mac
-scripts/uninstall-windows.ps1   desinstalacao no Windows
-scripts/verify-runtime.js       validacao do Playwright e Chromium
-scripts/verify-macos-dependencies.rb  validacao da arvore Homebrew
-dependencies.lock.json          versoes, origens e hashes homologados
-runtime/package.json            configuracao do runtime privado do Playwright
-tools/                          comandos do JP Tools
-```
-
-A pasta `scripts/` e necessaria. Os bootstraps publicos baixam o pacote e chamam os instaladores internos adequados ao sistema.
-
-## Transparencia
-
-- Os comandos sao scripts locais e podem ser lidos em `tools/`.
-- Os instaladores podem ser revisados em `scripts/`.
-- No Mac, os comandos sao instalados em `~/bin`.
-- No Windows, sao instalados em `%USERPROFILE%\\bin`.
-- Nao existe telemetria nem upload automatico dos projetos.
-- Dependencias sao baixadas de seus gerenciadores oficiais durante a instalacao.
+No Windows, o `jp-compress` usa ImageMagick ou FFmpeg como fallback para formatos cujos otimizadores especificos do Mac nao estao instalados.
 
 ## Limitacoes
 
-- `jp-capture` depende de Playwright e Chromium.
-- Videos remotos podem bloquear acesso ou captura.
-- O filtro HTML do `jp-poster` considera referencias de video presentes diretamente naquele HTML; um video definido apenas dentro de logica JS compartilhada nao pode ser associado com seguranca a um painel especifico.
-- A compressao depende dos otimizadores instalados no sistema.
-- Filtros sao intencionalmente rigidos para evitar alteracoes acidentais.
-
-## Novidades Da Versao 1.2.4
-
-- politica hibrida de dependencias, com Node, Playwright, Chromium e WebP atualizados normalmente;
-- FFmpeg, ImageMagick, jpegoptim, pngquant e oxipng mantidos em versoes homologadas;
-- migracao automatica de instalacoes `node@24` que podiam parar antes de criar os comandos;
-- limpeza restrita a residuos orfaos de npm/corepack, preservando outros modulos globais;
-- instalacao Homebrew sem pergunta interativa de confirmacao;
-- recarga automatica do PATH no Windows depois da instalacao pelo WinGet;
-- deteccao individual de Node, npm, FFmpeg e ImageMagick no Windows;
-- verificacao de comandos do `jp-compress` no Windows sem `shell: true`;
-- remocao dos pins transitivos criados durante os testes anteriores;
-- validacao real do Chromium depois da instalacao do runtime privado;
-- instaladores, desinstaladores, bootstrap e `jp-help` alinhados com a nova politica.
+- `jp-capture` depende de Playwright e Chromium;
+- videos remotos podem bloquear acesso ou captura;
+- o filtro HTML do `jp-poster` exige uma referencia direta de video naquele HTML;
+- videos definidos apenas por uma logica JS compartilhada nao podem ser associados com seguranca a um painel especifico;
+- a compressao depende dos otimizadores disponiveis no sistema;
+- filtros sao intencionalmente rigidos para evitar alteracoes acidentais.

@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.4`
+**Versao atual:** `1.2.5`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente projetos DSK e MSK.
 

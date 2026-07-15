@@ -161,5 +161,5 @@ PLAYWRIGHT_VERSION="$(node -p "require('$BIN_DIR/node_modules/playwright/package
 echo ""
 echo "JP Tools instalado. Abra um novo terminal do VSCode ou rode: source ~/.zshrc"
 echo "Node $(node --version) | Playwright $PLAYWRIGHT_VERSION"
-echo "Ferramentas independentes conferidas pelo lock da versao 1.2.4."
+echo "Ferramentas independentes conferidas pelo lock da versao 1.2.5."
 echo "Teste com: jp-help"

@@ -1,6 +1,6 @@
 {
   "name": "jp-tools-runtime",
-  "version": "1.2.5",
+  "version": "1.2.4",
   "private": true,
   "dependencies": {
     "playwright": "latest"

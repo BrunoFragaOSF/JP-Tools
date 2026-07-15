@@ -84,7 +84,7 @@ async function main() {
 
     const lock = {
         schemaVersion: 2,
-        jpToolsVersion: "1.2.5",
+        jpToolsVersion: "1.2.4",
         generatedAt: new Date().toISOString(),
         policy: {
             automaticallyUpdated: ["Node.js", "Playwright", "Chromium", "WebP"],

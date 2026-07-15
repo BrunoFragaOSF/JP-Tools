@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.5`
+**Versao atual:** `1.2.4`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente banners DSK e MSK.
 
@@ -458,7 +458,7 @@ A pasta `scripts/` e necessaria. Os bootstraps publicos baixam o pacote e chamam
 - A compressao depende dos otimizadores instalados no sistema.
 - Filtros sao intencionalmente rigidos para evitar alteracoes acidentais.
 
-## Novidades Da Versao 1.2.5
+## Novidades Da Versao 1.2.4
 
 - politica hibrida de dependencias, com Node, Playwright, Chromium e WebP atualizados normalmente;
 - FFmpeg, ImageMagick, jpegoptim, pngquant e oxipng mantidos em versoes homologadas;

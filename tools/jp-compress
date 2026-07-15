@@ -143,6 +143,9 @@ const ignoredDirs = new Set([
     "dist",
     "build"
 ]);
+let knownDirsCache;
+let knownPathsCache;
+
 validateFilterSyntax(filterParts, compressExample("default"));
 let filterGroups = isRestoreMode || isRestoreRemoveMode ? parseRestoreGroups(filterParts) : parseCompressGroups(filterParts);
 let excludedCompressGroups = !isRestoreMode && !isRestoreRemoveMode ? parseCompressExcludeGroups(filterParts) : [];
@@ -396,9 +399,6 @@ function walkFiles(dir, results = []) {
 
     return results;
 }
-
-let knownDirsCache;
-let knownPathsCache;
 
 function allKnownDirs() {
     if (knownDirsCache) return knownDirsCache;

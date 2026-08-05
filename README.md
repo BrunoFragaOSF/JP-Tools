@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.5`
+**Versao atual:** `1.2.6`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente projetos DSK e MSK.
 
@@ -50,6 +50,7 @@ Sem argumentos, comprime JPG, PNG e WebP dentro de `banner/assets`, alem de `ban
 
 - Qualidade padrao: `80`.
 - So substitui uma imagem quando o resultado fica menor.
+- Em PNG, a qualidade informada e o minimo aceito; se ela nao puder ser mantida, usa apenas a otimizacao sem perda.
 - Antes de substituir, salva o original em `.jp-compress-original` na pasta da versao.
 - O backup preserva a estrutura original, como `.jp-compress-original/banner/assets/CTA.png`.
 

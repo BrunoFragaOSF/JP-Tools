@@ -871,9 +871,8 @@ function compressJpeg(filePath, imageQuality) {
 }
 
 function pngquantRange(imageQuality) {
-    const max = imageQuality;
-    const min = Math.max(0, Math.min(max, imageQuality - 15));
-    return min + "-" + max;
+    const min = Math.round(Math.max(0, Math.min(100, imageQuality)));
+    return min + "-100";
 }
 
 function compressPng(filePath, imageQuality) {
@@ -885,6 +884,7 @@ function compressPng(filePath, imageQuality) {
         const result = run("pngquant", [
             "--force",
             "--skip-if-larger",
+            "--speed", "1",
             "--quality", pngquantRange(imageQuality),
             "--output", quantPath,
             filePath

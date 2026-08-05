@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const readline = require("readline");
 const { spawnSync } = require("child_process");
 const { resolveProjectContext } = require("./jp-project-roots");
 
@@ -23,6 +24,14 @@ const errorColor = process.stderr.isTTY ? {
     red: "\x1b[31m",
     yellow: "\x1b[33m"
 } : { reset: "", bold: "", red: "", yellow: "" };
+
+const promptColor = process.stdout.isTTY ? {
+    reset: "\x1b[0m",
+    bold: "\x1b[1m",
+    red: "\x1b[31m",
+    yellow: "\x1b[33m",
+    green: "\x1b[32m"
+} : { reset: "", bold: "", red: "", yellow: "", green: "" };
 
 function fail(message, details) {
     console.error(errorColor.bold + errorColor.red + "JP Tools error:" + errorColor.reset + " " + message);
@@ -57,6 +66,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
     console.log("Targets jpg, jpeg, png and webp inside banner/assets plus banner/backup.jpg.");
     console.log("Before replacing an image, saves the original in .jp-compress-original next to index.html/banner.");
     console.log("Only replaces an image when the compressed file is smaller.");
+    console.log("Before writing files, warns about possible color changes and requires Y confirmation. N or Enter cancels without changes.");
     console.log("Advanced filters: folders/versions use / for levels, like EN/V1; use --and for groups and --not to exclude. Filters are case-sensitive. Image filters must use exact filenames with extension, like CTA.png.");
     console.log("Settings: quality before the first filter becomes the default. After --and, it applies only to that group, like jp-compress 80 EN/V1 --and 70 FR/V2.");
     process.exit(0);
@@ -760,6 +770,72 @@ function qualitySummaryLabel() {
     return values.length === 1 ? String(values[0]) : values.join(", ");
 }
 
+function askCompressionConfirmation(images) {
+    const qualities = images.map((imagePath) => qualityForImage(imagePath));
+    const hasLowQuality = qualities.some((imageQuality) => imageQuality < 80);
+    const color = hasLowQuality ? promptColor.red : promptColor.yellow;
+    const heading = hasLowQuality ? "ATENCAO:" : "Aviso:";
+
+    console.log("");
+    console.log(promptColor.bold + color + heading + promptColor.reset + (hasLowQuality
+        ? " uma ou mais imagens usam qualidade abaixo de 80."
+        : " a compressao de PNG pode reduzir a quantidade de cores."));
+
+    if (hasLowQuality) {
+        console.log("Qualidades abaixo de 80 permitem uma reducao mais agressiva da paleta de cores.");
+        console.log("Fotografias, transparencias e degrades podem perder saturacao ou ficar acinzentados.");
+    } else {
+        console.log("A qualidade 80 ou superior preserva melhor imagens fotograficas, mas pequenas");
+        console.log("diferencas visuais ainda podem acontecer.");
+    }
+
+    console.log("");
+    console.log("Os arquivos originais serao salvos antes da compressao.");
+
+    const interface = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    return new Promise((resolve) => {
+        let settled = false;
+
+        function finish(confirmed, message) {
+            if (settled) return;
+            settled = true;
+            console.log(message);
+            resolve(confirmed);
+            interface.close();
+        }
+
+        interface.on("close", () => {
+            if (!settled) finish(false, "jp-compress cancelado. Nenhuma imagem ou backup foi alterado.");
+        });
+
+        function ask() {
+            interface.question("Deseja continuar? [Y/N]: ", (answer) => {
+                const normalized = answer.trim().toLowerCase();
+
+                if (normalized === "y") {
+                    finish(true, promptColor.green + "Compressao confirmada." + promptColor.reset);
+                    console.log("");
+                    return;
+                }
+
+                if (normalized === "" || normalized === "n") {
+                    finish(false, "jp-compress cancelado. Nenhuma imagem ou backup foi alterado.");
+                    return;
+                }
+
+                console.log(promptColor.yellow + "Resposta invalida. Digite Y para continuar ou N para cancelar." + promptColor.reset);
+                ask();
+            });
+        }
+
+        ask();
+    });
+}
+
 function collectAssetsDirs() {
     const candidates = searchRoots.flatMap((searchRoot) => [searchRoot, ...walkDirs(searchRoot)])
         .filter(isAssetsDir)
@@ -1173,7 +1249,7 @@ function validateCompressFilterTargets(allImages) {
     fail("Invalid jp-compress filter.", details);
 }
 
-function compressImages() {
+async function compressImages() {
     const assetsDirs = collectAssetsDirs();
 
     if (!assetsDirs.length) {
@@ -1209,6 +1285,8 @@ function compressImages() {
     const scopeLabel = assetsDirs.length + " assets folder(s)" + (backupCount ? " + " + backupCount + " backup.jpg" : "") + " | originals saved";
     console.log("jp-compress: " + images.length + " image(s) | quality " + qualitySummaryLabel() + " | " + scopeLabel);
 
+    if (!await askCompressionConfirmation(images)) return;
+
     let totalBefore = 0;
     let totalAfter = 0;
     let changedCount = 0;
@@ -1243,5 +1321,7 @@ if (isRestoreRemoveMode) {
 } else if (isRestoreMode) {
     restoreCompressedImages();
 } else {
-    compressImages();
+    compressImages().catch((error) => {
+        fail("Compression could not be started.", [error.message]);
+    });
 }

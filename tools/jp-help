@@ -7,7 +7,7 @@ const { resolveProjectContext } = require("./jp-project-roots");
 const projectContext = resolveProjectContext(process.cwd());
 const root = projectContext.root;
 const searchRoots = projectContext.searchRoots;
-const version = "1.2.6";
+const version = "1.2.7";
 const useColor = process.stdout.isTTY;
 const c = {
     reset: useColor ? "\x1b[0m" : "",
@@ -444,7 +444,7 @@ command(
     "jp-compress [qualidade] [filtro --and filtro]",
     "Comprime jpg/png/webp em banner/assets e banner/backup.jpg. Padrao: qualidade 80.",
     examples.compress,
-    ["So substitui quando o resultado fica menor.", "Salva originais em .jp-compress-original ao lado de index.html/banner.", "Imagem filtrada precisa de nome completo, extensao e case exato: " + colorExample(examples.compress[2])]
+    ["Mostra um aviso antes de alterar arquivos e exige confirmacao Y/N.", "N ou Enter cancela sem criar backups ou modificar imagens.", "Qualidade abaixo de 80 aumenta o risco de perda de saturacao ou aparencia acinzentada.", "So substitui quando o resultado fica menor.", "Salva originais em .jp-compress-original ao lado de index.html/banner.", "Imagem filtrada precisa de nome completo, extensao e case exato: " + colorExample(examples.compress[2])]
 );
 command(
     "jp-compress-original [filtro --not nomes --and filtro]",

@@ -7,7 +7,7 @@ const { resolveProjectContext } = require("./jp-project-roots");
 const projectContext = resolveProjectContext(process.cwd());
 const root = projectContext.root;
 const searchRoots = projectContext.searchRoots;
-const version = "1.2.7";
+const version = "1.3.0";
 const useColor = process.stdout.isTTY;
 const c = {
     reset: useColor ? "\x1b[0m" : "",
@@ -441,6 +441,12 @@ command(
 
 title("Compressao de imagens");
 command(
+    "jp-compress-video <MB> [--audio 0-100] [filtros]",
+    "Comprime MP4/WebM locais por tamanho: .800 = 800 KB; 1.2 = 1.2 MB por video. Nao e kbps.",
+    ["jp-compress-video 1.2", "jp-compress-video .800 --audio 80", "jp-compress-video 1.2 EN/V1 --and .800 FR/V2 video.webm"],
+    ["Audio padrao 50; 0 conserva audio basico; 100 prioriza audio, nao significa sem perdas.", "Mais audio deixa menos espaco para imagem. Preserva resolucao e FPS.", "Filtros case-sensitive; use / entre niveis, --and entre grupos e --not para excluir.", "O ultimo grupo compativel vence. Grupos herdam os ajustes iniciais quando omitidos.", "Originais: .jp-compress-video-original ao lado de banner/index. Arquivos ja abaixo do limite sao mantidos."]
+);
+command(
     "jp-compress [qualidade] [filtro --and filtro]",
     "Comprime jpg/png/webp em banner/assets e banner/backup.jpg. Padrao: qualidade 80.",
     examples.compress,
@@ -469,6 +475,7 @@ function officialCommands() {
         "jp-poster",
         "jp-poster-remove",
         "jp-compress",
+        "jp-compress-video",
         "jp-compress-original",
         "jp-compress-original-remove",
         "jp-help"

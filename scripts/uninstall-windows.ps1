@@ -8,6 +8,7 @@ $Commands = @(
     "jp-poster.cmd",
     "jp-poster-remove.cmd",
     "jp-compress.cmd",
+    "jp-compress-video.cmd",
     "jp-compress-original.cmd",
     "jp-compress-original-remove.cmd",
     "jp-help.cmd"

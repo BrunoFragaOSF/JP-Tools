@@ -138,6 +138,7 @@ copy_tool() {
 copy_tool jp-capture
 copy_tool jp-poster
 copy_tool jp-compress
+copy_tool jp-compress-video
 copy_tool jp-help
 copy_tool jp-project-roots.js
 
@@ -161,5 +162,5 @@ PLAYWRIGHT_VERSION="$(node -p "require('$BIN_DIR/node_modules/playwright/package
 echo ""
 echo "JP Tools instalado. Abra um novo terminal do VSCode ou rode: source ~/.zshrc"
 echo "Node $(node --version) | Playwright $PLAYWRIGHT_VERSION"
-echo "Ferramentas independentes conferidas pelo lock da versao 1.2.7."
+echo "Ferramentas independentes conferidas pelo lock da versao 1.3.0."
 echo "Teste com: jp-help"

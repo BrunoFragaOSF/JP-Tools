@@ -1,0 +1,192 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const { spawnSync } = require("child_process");
+const { resolveProjectContext } = require("./jp-project-roots.js");
+const { root, searchRoots } = resolveProjectContext();
+const args = process.argv.slice(2);
+const slash = value => value.split(path.sep).join("/");
+const ignored = new Set([".git", "node_modules", ".jp-compress-original", ".jp-compress-video-original", ".jp-compress-backup"]);
+
+function fail(message) {
+    console.error((process.stderr.isTTY ? "\x1b[31mJP Tools error:\x1b[0m " : "JP Tools error: ") + message);
+    process.exitCode = 1;
+}
+
+function run(command, parameters) {
+    const result = spawnSync(command, parameters, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+    if (result.error || result.status !== 0) throw new Error(command + ": " + (result.error ? result.error.message : result.stderr.trim().split("\n").slice(-5).join("\n")));
+    return result.stdout;
+}
+
+function probe(file) {
+    const info = JSON.parse(run("ffprobe", ["-v", "error", "-show_format", "-show_streams", "-of", "json", file]));
+    const videos = info.streams.filter(s => s.codec_type === "video");
+    const audios = info.streams.filter(s => s.codec_type === "audio");
+    const duration = Number(info.format.duration);
+    if (videos.length !== 1 || audios.length > 1 || !Number.isFinite(duration) || duration <= 0) {
+        throw new Error("Esperado um video com duracao valida e no maximo uma faixa de audio: " + file);
+    }
+    return { video: videos[0], audio: audios[0], duration };
+}
+
+function discover() {
+    const files = new Set();
+    function walk(dir) {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.name.startsWith(".") || ignored.has(entry.name)) continue;
+            const file = path.join(dir, entry.name);
+            if (entry.isDirectory()) walk(file);
+            else if (entry.isFile() && /\.(mp4|webm)$/i.test(entry.name)) files.add(file);
+        }
+    }
+    searchRoots.forEach(walk);
+    return [...files].sort();
+}
+
+function parse() {
+    const groups = [];
+    let group = { mb: undefined, audio: undefined, include: [], exclude: [] };
+    let excluding = false;
+    let filtersStarted = false;
+    for (let i = 0; i < args.length; i++) {
+        const token = args[i];
+        const lower = token.toLowerCase();
+        if (lower === "--and") {
+            if ((!group.include.length && groups.length) || (excluding && !group.exclude.length)) throw new Error("--and exige um filtro valido. Exemplo: jp-compress-video 1.2 EN/V1 --and .800 FR/V2");
+            groups.push(group);
+            group = { mb: undefined, audio: undefined, include: [], exclude: [] };
+            excluding = false;
+            filtersStarted = false;
+        } else if (lower === "--not") {
+            if (excluding) throw new Error("Use um unico --not por grupo, seguido dos filtros excluidos.");
+            excluding = true;
+            filtersStarted = true;
+        } else if (lower === "--audio") {
+            const value = args[++i];
+            if (filtersStarted || group.audio !== undefined || !/^\d+(?:\.\d+)?$/.test(value || "") || Number(value) > 100) throw new Error("Use --audio 0 a 100 antes dos filtros. Exemplo: jp-compress-video 1.2 --audio 80 EN/V1");
+            group.audio = Number(value);
+        } else if (/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(token)) {
+            if (filtersStarted || group.mb !== undefined || Number(token) <= 0) throw new Error("Informe um tamanho positivo em MB antes dos filtros.");
+            group.mb = Number(token);
+        } else {
+            if (token.startsWith("--")) throw new Error("Opcao desconhecida: " + token);
+            filtersStarted = true;
+            (excluding ? group.exclude : group.include).push(token.replace(/\\/g, "/").replace(/\/$/, ""));
+        }
+    }
+    if (excluding && !group.exclude.length) throw new Error("--not precisa de um filtro depois dele.");
+    if (groups.length && !group.include.length) throw new Error("--and precisa de um filtro depois dele.");
+    groups.push(group);
+    if (groups[0].mb === undefined) throw new Error("Informe o limite em MB: jp-compress-video .800 ou jp-compress-video 1.2 --audio 80");
+    return groups.map(g => ({ ...g, mb: g.mb ?? groups[0].mb, audio: g.audio ?? groups[0].audio ?? 50 }));
+}
+
+function matches(file, filter) {
+    const relative = slash(path.relative(root, file));
+    if (/\.(mp4|webm)$/i.test(filter)) return relative === filter || relative.endsWith("/" + filter);
+    const directory = slash(path.dirname(relative));
+    return directory === filter || directory.startsWith(filter + "/") || ("/" + directory + "/").includes("/" + filter + "/");
+}
+
+function select(files, groups) {
+    for (const group of groups) {
+        const dirs = group.include.filter(f => !/\.(mp4|webm)$/i.test(f));
+        const names = group.include.filter(f => /\.(mp4|webm)$/i.test(f));
+        if (dirs.length > 1) throw new Error("Use --and entre pastas ou / entre niveis. Exemplo: EN/V1 --and FR/V2");
+        for (const name of names) {
+            if (!files.some(f => (!dirs.length || matches(f, dirs[0])) && matches(f, name))) throw new Error("Video nao encontrado no grupo: " + [...dirs, name].join(" "));
+        }
+        for (const filter of [...group.include, ...group.exclude]) {
+            if (!files.some(f => matches(f, filter))) {
+                const similar = files.find(f => matches(f.toLowerCase(), filter.toLowerCase()));
+                throw new Error("Filtro de pasta/video nao encontrado: " + filter + ". Use / entre pastas e nome completo com extensao. Maiusculas e minusculas importam." + (similar ? " Confira: " + slash(path.relative(root, similar)) : ""));
+            }
+        }
+    }
+    return files.flatMap(file => {
+        let selected;
+        for (const group of groups) {
+            const dirs = group.include.filter(f => !/\.(mp4|webm)$/i.test(f));
+            const names = group.include.filter(f => /\.(mp4|webm)$/i.test(f));
+            if ((!dirs.length || matches(file, dirs[0])) && (!names.length || names.some(f => matches(file, f))) && !group.exclude.some(f => matches(file, f))) selected = group;
+        }
+        return selected ? [{ file, ...selected }] : [];
+    });
+}
+
+function backup(file) {
+    let dir = path.dirname(file);
+    let base = root;
+    while (dir !== path.dirname(dir)) {
+        if (path.basename(dir) === "banner") { base = path.dirname(dir); break; }
+        if (dir === root) break;
+        dir = path.dirname(dir);
+    }
+    const destination = path.join(base, ".jp-compress-video-original", path.relative(base, file));
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    if (!fs.existsSync(destination)) fs.copyFileSync(file, destination, fs.constants.COPYFILE_EXCL);
+}
+
+function compress(item) {
+    const { file, mb, audio: priority, info } = item;
+    const target = Math.floor(mb * 1000000);
+    const before = fs.statSync(file).size;
+    if (before <= target) { console.log("kept " + slash(path.relative(root, file)) + " (ja abaixo do limite)"); return; }
+    const webm = path.extname(file).toLowerCase() === ".webm";
+    const totalRate = Math.floor(target * 8 * 0.95 / info.duration);
+    const audioRate = info.audio ? Math.floor(Math.min(32000 + priority / 100 * 160000, totalRate * (0.1 + priority / 100 * 0.4))) : 0;
+    let videoRate = totalRate - audioRate;
+    if (videoRate < 16000 || (info.audio && audioRate < 6000)) throw new Error("Limite muito pequeno para a duracao de " + file + ". Aumente os MB.");
+    const tempDir = fs.mkdtempSync(path.join(path.dirname(file), ".jp-video-"));
+    const output = path.join(tempDir, "output" + path.extname(file));
+    const passlog = path.join(tempDir, "pass");
+    try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const common = ["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-noautorotate", "-i", file, "-map", "0:v:0", "-c:v", webm ? "libvpx-vp9" : "libx264", "-b:v", String(videoRate), "-fps_mode", "passthrough", "-passlogfile", passlog];
+            if (webm) common.push("-deadline", "good", "-cpu-used", "2");
+            else common.push("-preset", "medium", "-pix_fmt", "yuv420p");
+            run("ffmpeg", [...common, "-pass", "1", "-an", "-f", "null", process.platform === "win32" ? "NUL" : "/dev/null"]);
+            const second = [...common, "-pass", "2"];
+            if (info.audio) second.push("-map", "0:a:0", "-c:a", webm ? "libopus" : "aac", "-b:a", String(audioRate));
+            else second.push("-an");
+            second.push("-map_metadata", "0");
+            if (!webm) second.push("-movflags", "+faststart");
+            run("ffmpeg", [...second, output]);
+            const after = fs.statSync(output).size;
+            if (after > target) { videoRate = Math.floor(videoRate * target / after * 0.94); continue; }
+            const actual = probe(output);
+            if (actual.video.width !== info.video.width || actual.video.height !== info.video.height || Math.abs(actual.duration - info.duration) > 0.25 || Boolean(actual.audio) !== Boolean(info.audio)) throw new Error("Validacao falhou (dimensoes, duracao ou audio): " + file);
+            run("ffmpeg", ["-v", "error", "-xerror", "-i", output, "-f", "null", "-"]);
+            if (after >= before) return;
+            backup(file);
+            fs.renameSync(output, file);
+            console.log("compressed " + slash(path.relative(root, file)) + " " + (before / 1000000).toFixed(3) + " MB -> " + (after / 1000000).toFixed(3) + " MB | audio " + priority + "%");
+            return;
+        }
+        throw new Error("Nao foi possivel atingir " + mb + " MB. Original preservado: " + file);
+    } finally { fs.rmSync(tempDir, { recursive: true, force: true }); }
+}
+
+try {
+    if (args.includes("--help") || args.includes("-h")) {
+        console.log("jp-compress-video <MB> [--audio 0-100] [pasta video.mp4] [--not filtro] [--and <MB> filtros]");
+        console.log(".800 = 800 KB; 1.2 = 1.2 MB por video (MB decimal, nao kbps). MP4 e WebM locais.");
+        console.log("Audio: padrao 50; 0 preserva audio basico; 100 prioriza audio ate 192 kbps/50% do bitrate disponivel.");
+        console.log("jp-compress-video 1.2 --audio 80 EN/V1 --and .800 FR/V2 video.webm");
+        console.log("Sem filtro: todos os MP4/WebM do escopo. Filtros exatos e case-sensitive; caminhos usam /.");
+        console.log("Grupos herdam tamanho/audio do primeiro grupo. O ultimo grupo compativel tem prioridade.");
+        console.log("Preserva resolucao/FPS; originais em .jp-compress-video-original ao lado de banner/index.");
+        console.log("Mais prioridade de audio deixa menos espaco para imagem. 100 nao significa audio sem perdas.");
+    } else {
+        const groups = parse();
+        const items = select(discover(), groups);
+        if (!items.length) throw new Error("Nenhum MP4/WebM encontrado no escopo.");
+        run("ffmpeg", ["-version"]);
+        for (const item of items) item.info = probe(item.file);
+        console.log("jp-compress-video: " + items.length + " video(s) | limite por arquivo em MB");
+        for (const item of items) compress(item);
+    }
+} catch (error) { fail(error.message); }

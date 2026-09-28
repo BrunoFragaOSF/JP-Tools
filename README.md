@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.2.7`
+**Versao atual:** `1.3.0`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente projetos DSK e MSK.
 
@@ -55,6 +55,23 @@ Sem argumentos, comprime JPG, PNG e WebP dentro de `banner/assets`, alem de `ban
 - Em PNG, a qualidade informada e o minimo aceito; se ela nao puder ser mantida, usa apenas a otimizacao sem perda.
 - Antes de substituir, salva o original em `.jp-compress-original` na pasta da versao.
 - O backup preserva a estrutura original, como `.jp-compress-original/banner/assets/CTA.png`.
+
+### `jp-compress-video`
+
+Comprime videos locais MP4 e WebM para um limite de tamanho por arquivo. `.800` significa **800 KB** e `1.2` significa **1,2 MB** (1 MB = 1.000.000 bytes). Esse valor e tamanho de arquivo, nao kbps.
+
+```bash
+jp-compress-video 1.2
+jp-compress-video .800 --audio 80
+jp-compress-video 1.2 EN/V1 --and .800 FR/V2 video.webm
+jp-compress-video 1.2 --not intro.mp4
+```
+
+`--audio` aceita 0 a 100, com padrao 50. Zero preserva audio basico; 100 prioriza o audio ate 192 kbps, limitado a metade do bitrate disponivel. Nao representa qualidade perceptual exata ou audio sem perdas. Aumentar a prioridade do audio deixa menos espaco para a imagem. Videos sem audio continuam sem audio.
+
+Sem filtros, processa os MP4/WebM no escopo detectado. Filtros exigem nomes exatos, extensoes e maiusculas/minusculas corretas. Use `/` entre niveis, `--and` entre grupos e `--not` para excluir. Grupos herdam os ajustes iniciais quando omitidos; o ultimo grupo compativel tem prioridade.
+
+Usa FFmpeg em duas passagens (H.264/AAC em MP4 e VP9/Opus em WebM), preservando resolucao e temporizacao dos frames. Ja abaixo do limite: mantem o arquivo. Valida duracao, dimensoes, audio e decodificacao antes de substituir; se nao atingir o limite, preserva o original e informa o erro. Originais ficam em `.jp-compress-video-original` ao lado de `banner/index`, mantendo o caminho de cada arquivo. Esta versao nao oferece garantia de preservacao de alpha/HDR nem processamento de multiplas faixas de audio.
 
 ## Onde Os Comandos Atuam
 

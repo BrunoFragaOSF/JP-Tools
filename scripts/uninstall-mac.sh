@@ -11,6 +11,7 @@ COMMANDS=(
     jp-poster-remove
     jp-compress
     jp-compress-video
+    jp-convert
     jp-compress-original
     jp-compress-original-remove
     jp-help

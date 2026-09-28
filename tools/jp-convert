@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const { parse, select, discover, probe, run, validateOutput } = require("./jp-compress-video");
+const args = process.argv.slice(2);
+
+try {
+    if (args.includes("--help") || args.includes("-h")) {
+        console.log("jp-convert <mp4|webm> [pasta video.ext] [--not filtro] [--and filtro]");
+        console.log("jp-convert webm | jp-convert mp4 intro.webm | jp-convert webm EN/V1 --and FR/V2");
+        console.log("Cria o novo formato ao lado do original, preservando o original, resolucao, frames e presenca de audio.");
+        console.log("Nomes com espacos/parenteses precisam de aspas: jp-convert webm \"DSK (Lead Up)\"");
+        console.log("Destino existente gera erro antes de converter qualquer arquivo. Sem limite de MB; use jp-compress-video depois.");
+        console.log("Conversao com perdas de alta qualidade; alpha/HDR nao tem preservacao garantida.");
+    } else {
+        const format = (args.shift() || "").toLowerCase();
+        if (!["mp4", "webm"].includes(format)) throw new Error("Informe o formato de destino: jp-convert mp4 ou jp-convert webm");
+        if (args.some(arg => arg.toLowerCase() === "--audio" || /^(?:\d+(?:\.\d+)?|\.\d+)$/.test(arg))) throw new Error("jp-convert aceita formato e filtros. Para limite em MB/audio, use jp-compress-video depois.");
+        const groups = parse(["1", ...args]);
+        const items = select(discover(), groups).filter(item => path.extname(item.file).toLowerCase() !== "." + format);
+        if (!items.length) throw new Error("Nenhum video do formato de origem encontrado para converter em " + format + ".");
+        const destinations = new Set();
+        for (const item of items) {
+            item.output = item.file.slice(0, -path.extname(item.file).length) + "." + format;
+            if (fs.existsSync(item.output) || destinations.has(item.output)) throw new Error("Destino ja existe: " + item.output + ". Renomeie ou mova esse arquivo antes de converter.");
+            destinations.add(item.output);
+            item.info = probe(item.file);
+        }
+        for (const item of items) {
+            console.log("converting " + item.file + " -> " + format);
+            const tempDir = fs.mkdtempSync(path.join(path.dirname(item.file), ".jp-convert-"));
+            const temp = path.join(tempDir, "output." + format);
+            try {
+                const parameters = ["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-noautorotate", "-i", item.file, "-map", "0:v:0", "-fps_mode", "passthrough", "-map_metadata", "0"];
+                if (format === "mp4") parameters.push("-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart");
+                else parameters.push("-c:v", "libvpx-vp9", "-deadline", "good", "-cpu-used", "0", "-crf", "24", "-b:v", "0");
+                if (item.info.audio) parameters.push("-map", "0:a:0", "-c:a", format === "mp4" ? "aac" : "libopus", "-b:a", "192k");
+                else parameters.push("-an");
+                run("ffmpeg", [...parameters, temp]);
+                validateOutput(temp, item.info);
+                fs.copyFileSync(temp, item.output, fs.constants.COPYFILE_EXCL);
+                console.log("created " + item.output);
+            } finally { fs.rmSync(tempDir, { recursive: true, force: true }); }
+        }
+    }
+} catch (error) {
+    console.error((process.stderr.isTTY ? "\x1b[31mJP Tools error:\x1b[0m " : "JP Tools error: ") + error.message);
+    process.exitCode = 1;
+}

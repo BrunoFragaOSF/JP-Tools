@@ -1,6 +1,6 @@
 # JP Tools
 
-**Versao atual:** `1.3.0`
+**Versao atual:** `1.4.0`
 
 Ferramentas de terminal para automatizar tarefas repetitivas em criativos JustPremium/GumGum, principalmente projetos DSK e MSK.
 
@@ -58,6 +58,8 @@ Sem argumentos, comprime JPG, PNG e WebP dentro de `banner/assets`, alem de `ban
 
 ### `jp-compress-video`
 
+Codificacao de maior qualidade: H.264 `slow` e VP9 `cpu-used 0`. Ate quatro tentativas ajustam o bitrate para aproveitar melhor o limite. Mantem o resultado de maior bitrate que couber; o arquivo final nunca ultrapassa o limite. Esse processamento pode demorar mais, e a melhoria visual varia conforme o video.
+
 Comprime videos locais MP4 e WebM para um limite de tamanho por arquivo. `.800` significa **800 KB** e `1.2` significa **1,2 MB** (1 MB = 1.000.000 bytes). Esse valor e tamanho de arquivo, nao kbps.
 
 ```bash
@@ -72,6 +74,19 @@ jp-compress-video 1.2 --not intro.mp4
 Sem filtros, processa os MP4/WebM no escopo detectado. Filtros exigem nomes exatos, extensoes e maiusculas/minusculas corretas. Use `/` entre niveis, `--and` entre grupos e `--not` para excluir. Grupos herdam os ajustes iniciais quando omitidos; o ultimo grupo compativel tem prioridade.
 
 Usa FFmpeg em duas passagens (H.264/AAC em MP4 e VP9/Opus em WebM), preservando resolucao e temporizacao dos frames. Ja abaixo do limite: mantem o arquivo. Valida duracao, dimensoes, audio e decodificacao antes de substituir; se nao atingir o limite, preserva o original e informa o erro. Originais ficam em `.jp-compress-video-original` ao lado de `banner/index`, mantendo o caminho de cada arquivo. Esta versao nao oferece garantia de preservacao de alpha/HDR nem processamento de multiplas faixas de audio.
+
+### `jp-convert`
+
+Converte MP4 para WebM e vice-versa, criando o arquivo de destino ao lado do original.
+
+```bash
+jp-convert webm
+jp-convert mp4 intro.webm
+jp-convert webm EN/V1 --and FR/V2
+jp-convert webm "DSK 9:28-10:8 (Lead Up)"
+```
+
+O primeiro argumento e o formato de destino. Filtros seguem as mesmas regras do compressor de videos, incluindo `--and`, `--not` e nomes exatos. Use aspas para pastas com espacos ou parenteses. Destinos existentes geram erro antes de iniciar o lote. Preserva o original, dimensoes, temporizacao dos frames e presenca de audio. Usa H.264 CRF 18 ou VP9 CRF 24, com AAC/Opus a 192 kbps quando houver audio. A conversao tem perdas e nao promete manter alpha/HDR. Nao possui limite de MB: para limitar o peso do resultado, execute `jp-compress-video` depois.
 
 ## Onde Os Comandos Atuam
 
